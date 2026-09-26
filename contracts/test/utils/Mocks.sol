@@ -18,6 +18,11 @@ contract MockUSDC is ERC20, ERC20Permit {
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
     }
+
+    /// Test-only: destroys tokens held by `from`, e.g. to inject a loss into a vault.
+    function burn(address from, uint256 amount) external {
+        _burn(from, amount);
+    }
 }
 
 /// @notice Charges 1 atomic unit per transfer, to exercise guard 12's balance-delta check.
@@ -59,6 +64,16 @@ contract MockVault is ERC4626 {
     {
         lastReceiver = receiver;
         super._withdraw(caller, receiver, owner, assets, shares);
+    }
+}
+
+/// @notice ERC-4626 that takes the assets but mints no shares, as a real vault can for a small deposit
+/// at a high share price.
+contract ZeroShareVault is ERC4626 {
+    constructor(IERC20 asset_) ERC20("Zero", "ZERO") ERC4626(asset_) {}
+
+    function _convertToShares(uint256, Math.Rounding) internal pure override returns (uint256) {
+        return 0;
     }
 }
 

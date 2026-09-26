@@ -130,8 +130,16 @@ interface IEscrowEvents {
     // --- yield, loss, reserve (C2) ---
     event Deployed(uint256 assets);
     event Redeemed(uint256 assets);
-    event YieldAccrued(uint256 gain, uint256 accYieldPerUnit);
+    /// @dev `gain` is after lossDebt repayment; `toReserve` is the part credited to the reserve
+    /// because no principal was open (docs/adr/0010).
+    event YieldAccrued(uint256 gain, uint256 toReserve, uint256 accYieldPerUnit);
+    /// @dev `fromOwner` covers the owner claim bucket and the owner's deferred yield (docs/adr/0010).
     event LossRecognised(uint256 loss, uint256 fromReserve, uint256 fromOwner, uint256 toDebt);
+    event ShortfallObserved(uint256 shortfall);
+    event ShortfallCleared();
+    event YieldDeferred(bytes32 indexed bookingId, uint256 guestYield, uint256 ownerYield);
+    event PendingYieldReleased(address indexed account, uint256 amount);
+    event ReserveWithdrawalProposed(uint256 amount, uint8 reasonCode);
     event LossRepaid(uint256 amount, uint256 lossDebt);
     event LossToppedUp(uint256 amount, uint256 lossDebt);
     event ReserveFunded(uint256 amount);
@@ -186,6 +194,20 @@ interface IEscrowErrors {
     error FeeAboveMax();
     error RenounceDisabled();
     error ZeroMinNightly();
+
+    // yield, loss, reserve (C2)
+    error NotRebalancer();
+    error NoVault();
+    error ShortfallPending();
+    error BufferBreached();
+    error DeployCapExceeded();
+    error NoLossToRecognise();
+    error LossWindowOpen();
+    error NoLossDebt();
+    error ReserveInsufficient();
+    error ReserveProposalMismatch();
+    error ZeroAmount();
+    error VaultMintedNoShares();
 }
 
 interface IEscrow is IEscrowEvents, IEscrowErrors {
@@ -223,6 +245,16 @@ interface IEscrow is IEscrowEvents, IEscrowErrors {
     function proposeFeeBps(uint16 feeBps) external;
     function proposeArbitrator(address arbitrator) external;
 
+    // --- yield, loss, reserve (C2) ---
+    function deploy(uint256 assets) external; // rebalancer
+    function redeem(uint256 assets) external; // rebalancer
+    function observeShortfall() external; // permissionless: runs accrue()
+    function recogniseLoss() external; // permissionless, after LOSS_CONFIRMATION_WINDOW
+    function topUpLoss(uint256 amount) external; // owner
+    function fundReserve(uint256 amount) external; // owner
+    function proposeReserveWithdrawal(uint256 amount, uint8 reasonCode) external; // owner
+    function confirmReserveWithdrawal(uint256 amount, uint8 reasonCode) external; // guardian
+
     // --- views ---
     function hashQuote(Quote calldata q) external pure returns (bytes32 bookingId);
     function quoteDigest(Quote calldata q) external view returns (bytes32);
@@ -234,4 +266,6 @@ interface IEscrow is IEscrowEvents, IEscrowErrors {
     function refundBpsNow(bytes32 bookingId) external view returns (uint16);
     function claimableOf(address account) external view returns (uint256);
     function totalAssets() external view returns (uint256);
+    function shortfall() external view returns (uint256);
+    function pendingYieldOf(address account) external view returns (uint256);
 }

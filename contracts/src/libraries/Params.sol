@@ -18,6 +18,9 @@ library Params {
     uint16 internal constant MIN_BUFFER_BPS = 1_000;
     uint32 internal constant LOSS_CONFIRMATION_WINDOW = 6 hours;
     uint32 internal constant MAX_FREEZE_DURATION = 30 days;
+    /// @dev Shortfalls below this are ignored for gating and recognition, so ERC-4626 rounding dust
+    /// cannot block owners or be recognised to grief deposits (docs/adr/0010).
+    uint256 internal constant MIN_LOSS_ATOMIC = 1e6; // 1 USDC
 
     // owner-set defaults at creation
     uint16 internal constant DEFAULT_GUEST_YIELD_BPS = 5_000;

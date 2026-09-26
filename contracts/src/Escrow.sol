@@ -22,13 +22,20 @@ import {IEscrowFactory} from "./interfaces/IEscrowFactory.sol";
 import {QuoteLib} from "./libraries/QuoteLib.sol";
 import {SettlementLib} from "./libraries/SettlementLib.sol";
 import {Params} from "./libraries/Params.sol";
+import {BookingLib} from "./libraries/BookingLib.sol";
+import {LedgerLib, Ledger} from "./libraries/LedgerLib.sol";
 
 /// @title Escrow
 /// @notice One per property owner, deployed by `EscrowFactory` as an EIP-1167 clone (docs/adr/0005).
 /// Holds guests' USDC prepayments against server-signed quotes until the stay completes
 /// (docs/chain-spec.md sections 3 and 4).
-/// @dev Work package C1. Yield accounting (C2) and disputes (C3) plug into `_accrue`,
-/// `_crystalliseYield` and the accounting fields declared below.
+/// @dev C1: bookings, claims, roles. C2: yield accumulator with a high-water-mark baseline, loss
+/// recognition and absorption, reserve, deploy and redeem (spec 6; docs/adr/0009, 0010).
+/// Disputes (C3) use `totalDisputed` and `totalPendingYield`.
+///
+/// Books identity, exact after every state-changing call (tested as an invariant):
+///   lastAssets + lossDebt == totalOpenPrincipal + totalDisputed + totalClaimable
+///                            + totalPendingYield + reserve + yieldUnallocated
 contract Escrow is
     IEscrow,
     Initializable,
@@ -68,23 +75,10 @@ contract Escrow is
     uint256 public maxOpenPrincipalAtomic; // spec 12.3 escrowed-value cap (docs/adr/0007)
 
     // ------------------------------------------------------------------------------------------
-    // Accounting (spec 6.1). C2 and C3 own the fields C1 leaves at zero.
+    // Accounting (spec 6.1). All of it lives in one struct so the linked LedgerLib can operate on
+    // it (docs/adr/0010). Getters below keep the field names.
 
-    uint256 public totalOpenPrincipal;
-    uint256 public totalDisputed;
-    uint256 public totalPendingYield;
-    uint256 public totalClaimable;
-    uint256 public reserve;
-    uint256 public lossDebt;
-    uint256 public accYieldPerUnit;
-    uint256 public lastAssets;
-
-    /// @notice Claim buckets (docs/adr/0007). The owner's bucket is not keyed by address, so
-    /// changing the payout address cannot strand credits or escape the lossDebt gate.
-    mapping(address => uint256) public guestClaimable;
-    mapping(address => uint256) public feeClaimable;
-    uint256 public ownerClaimable;
-
+    Ledger internal _l;
     mapping(bytes32 => Booking) internal _bookings;
     mapping(bytes32 => Cutoff[]) internal _cutoffs;
 
@@ -180,7 +174,7 @@ contract Escrow is
         if (_bookings[bookingId].state != BookingState.NONE) revert BookingExists();
         // 5
         _requireNotPaused();
-        if (lossDebt != 0) revert LossDebtOutstanding();
+        if (_l.lossDebt != 0) revert LossDebtOutstanding();
         // 6
         if (!(block.timestamp < q.checkInUtc && q.checkInUtc < q.checkOutUtc)) revert InvalidStayTimes();
         // 7
@@ -195,61 +189,15 @@ contract Escrow is
         // 11
         if (!QuoteLib.validCurve(q.cutoffs, q.finalBps, q.checkInUtc)) revert InvalidCutoffs();
         // escrowed-value cap (spec 12.3, docs/adr/0007)
-        if (totalOpenPrincipal + q.priceAtomic > maxOpenPrincipalAtomic) revert EscrowCapExceeded();
+        if (_l.totalOpenPrincipal + q.priceAtomic > maxOpenPrincipalAtomic) revert EscrowCapExceeded();
 
         // 12: accrue, record, then pull exactly priceAtomic and check the balance delta.
         _accrue();
         _promoteTimelocks();
-        address bookingArbitrator = arbitrator;
-        uint256 acc = accYieldPerUnit;
-        _store(bookingId, q, bookingArbitrator, acc);
-        totalOpenPrincipal += q.priceAtomic;
-        lastAssets += q.priceAtomic;
-
-        uint256 balanceBefore = usdc.balanceOf(address(this));
-        usdc.safeTransferFrom(msg.sender, address(this), q.priceAtomic);
-        if (usdc.balanceOf(address(this)) - balanceBefore != q.priceAtomic) revert TransferAmountMismatch();
-
-        _emitDeposited(bookingId, q, bookingArbitrator, acc);
-    }
-
-    function _store(bytes32 bookingId, Quote calldata q, address bookingArbitrator, uint256 acc) private {
-        Booking storage b = _bookings[bookingId];
-        b.guest = q.guest;
-        b.checkInUtc = q.checkInUtc;
-        b.checkOutUtc = q.checkOutUtc;
-        b.feeBps = q.feeBps;
-        b.state = BookingState.ESCROWED;
-        b.arbitrator = bookingArbitrator;
-        b.guestYieldBps = q.guestYieldBps;
-        b.finalBps = q.finalBps;
-        b.resourceId = q.resourceId;
-        b.principalAtomic = q.priceAtomic;
-        b.accAtDeposit = acc;
-        Cutoff[] storage cs = _cutoffs[bookingId];
-        for (uint256 i; i < q.cutoffs.length; ++i) {
-            cs.push(q.cutoffs[i]);
-        }
-    }
-
-    function _emitDeposited(bytes32 bookingId, Quote calldata q, address bookingArbitrator, uint256 acc)
-        private
-    {
-        emit BookingDeposited(
-            bookingId,
-            q.guest,
-            q.resourceId,
-            q.checkInUtc,
-            q.checkOutUtc,
-            q.priceAtomic,
-            q.feeBps,
-            q.guestYieldBps,
-            q.policyHash,
-            q.cutoffs,
-            q.finalBps,
-            bookingArbitrator,
-            acc
-        );
+        BookingLib.record(_bookings, _cutoffs, bookingId, q, arbitrator, _l.accYieldPerUnit);
+        _l.totalOpenPrincipal += q.priceAtomic;
+        _l.lastAssets += q.priceAtomic;
+        _pullExact(q.priceAtomic);
     }
 
     // ==========================================================================================
@@ -286,37 +234,12 @@ contract Escrow is
         _settle(bookingId, b, 0, true, Outcome.COMPLETED);
     }
 
-    /// @dev Spec 4.4, run once per ending. Credits balances; never transfers.
+    /// @dev Spec 4.4, run once per ending. Credits balances; never transfers. Fee recipient is read
+    /// at settlement; the arbitrator was snapshotted at deposit (spec 3.4).
     function _settle(bytes32 bookingId, Booking storage b, uint256 refundBps, bool vested, Outcome outcome)
         private
     {
-        uint256 principal = b.principalAtomic;
-        uint256 y = _crystalliseYield(bookingId);
-        SettlementLib.Figures memory f =
-            SettlementLib.compute(principal, refundBps, b.feeBps, y, b.guestYieldBps, vested);
-
-        b.state = BookingState.SETTLED;
-        totalOpenPrincipal -= principal;
-
-        // Fee recipient is read at settlement; the arbitrator was snapshotted at deposit (spec 3.4).
-        address feeTo = factory.feeRecipient();
-        guestClaimable[b.guest] += f.refund + f.guestYield;
-        ownerClaimable += f.ownerPrincipal + f.ownerYield;
-        feeClaimable[feeTo] += f.fee;
-        totalClaimable += principal + y;
-
-        emit BookingSettled(
-            bookingId,
-            outcome,
-            principal,
-            f.refund,
-            f.ownerPrincipal,
-            f.fee,
-            y,
-            f.guestYield,
-            f.ownerYield,
-            feeTo
-        );
+        LedgerLib.settle(_l, b, bookingId, refundBps, vested, outcome, factory.feeRecipient());
     }
 
     function _escrowed(bytes32 bookingId) private view returns (Booking storage b) {
@@ -336,46 +259,7 @@ contract Escrow is
     function claim() external nonReentrant returns (uint256 paid) {
         _accrue();
         _promoteTimelocks();
-
-        uint256 g = guestClaimable[msg.sender];
-        uint256 f = feeClaimable[msg.sender];
-        uint256 o = msg.sender == payoutAddress ? ownerClaimable : 0;
-        if (lossDebt != 0) {
-            if (g == 0 && (f != 0 || o != 0)) revert LossDebtOutstanding();
-            f = 0;
-            o = 0;
-        }
-        uint256 requested = g + f + o;
-        if (requested == 0) return 0;
-
-        // Checks: size the vault pull from views only, so every state write precedes every
-        // external call (checks-effects-interactions).
-        uint256 idle = usdc.balanceOf(address(this));
-        uint256 pull;
-        if (idle < requested && address(vault) != address(0)) {
-            pull = Math.min(requested - idle, vault.maxWithdraw(address(this)));
-        }
-        paid = Math.min(requested, idle + pull);
-
-        // Effects: guest bucket first, then fee, then owner.
-        uint256 left = paid;
-        uint256 fromGuest = Math.min(left, g);
-        guestClaimable[msg.sender] = g - fromGuest;
-        left -= fromGuest;
-        uint256 fromFee = Math.min(left, f);
-        feeClaimable[msg.sender] -= fromFee;
-        left -= fromFee;
-        ownerClaimable -= left;
-        totalClaimable -= paid;
-        lastAssets -= paid;
-        emit Claimed(msg.sender, requested, paid);
-
-        // Interactions. The vault receiver is always the escrow itself (CLAUDE.md money rule 3).
-        if (pull != 0) {
-            vault.withdraw(pull, address(this), address(this));
-            emit Redeemed(pull);
-        }
-        if (paid != 0) usdc.safeTransfer(msg.sender, paid);
+        paid = LedgerLib.claim(_l, usdc, vault, msg.sender, msg.sender == payoutAddress);
     }
 
     // ==========================================================================================
@@ -521,19 +405,96 @@ contract Escrow is
     // ==========================================================================================
     // Hooks for C2
 
-    /// @dev C1: tracks assets only. C2 replaces this with the accumulator (spec 6.1).
+    /// @dev Spec 6.1 with the high-water-mark baseline (docs/adr/0009); see LedgerLib.accrue.
     function _accrue() internal {
-        lastAssets = _totalAssets();
+        LedgerLib.accrue(_l, usdc, vault);
     }
 
-    /// @dev C1: no yield. C2 returns principal * (accYieldPerUnit - accAtDeposit) / 1e18.
-    function _crystalliseYield(bytes32) internal pure returns (uint256) {
-        return 0;
+    // ==========================================================================================
+    // Yield deployment (spec 6.3)
+
+    modifier onlyRebalancer() {
+        if (msg.sender != rebalancer || msg.sender == address(0)) revert NotRebalancer();
+        _;
     }
 
-    function _totalAssets() internal view returns (uint256 assets) {
-        assets = usdc.balanceOf(address(this));
-        if (address(vault) != address(0)) assets += vault.previewRedeem(vault.balanceOf(address(this)));
+    /// @inheritdoc IEscrow
+    function deploy(uint256 assets) external onlyRebalancer nonReentrant {
+        _accrue();
+        LedgerLib.deploy(_l, usdc, vault, assets, maxDeployBps);
+    }
+
+    /// @inheritdoc IEscrow
+    /// @dev Allowed during a loss: the rebalancer may always move funds back to idle (spec 6.4).
+    function redeem(uint256 assets) external onlyRebalancer nonReentrant {
+        _accrue();
+        if (address(vault) == address(0)) revert NoVault();
+        if (assets == 0) revert ZeroAmount();
+        LedgerLib.pullFromVault(vault, assets);
+    }
+
+    // ==========================================================================================
+    // Loss handling (spec 6.4; docs/adr/0009, 0010)
+
+    /// @inheritdoc IEscrow
+    function observeShortfall() external nonReentrant {
+        _accrue();
+    }
+
+    /// @inheritdoc IEscrow
+    function recogniseLoss() external nonReentrant {
+        _accrue();
+        LedgerLib.recogniseLoss(_l, usdc, vault);
+    }
+
+    /// @inheritdoc IEscrow
+    function topUpLoss(uint256 amount) external onlyOwner nonReentrant {
+        _accrue();
+        uint256 debt = _l.lossDebt;
+        if (debt == 0) revert NoLossDebt();
+        uint256 take = Math.min(amount, debt);
+        if (take == 0) revert ZeroAmount();
+        _l.lossDebt = debt - take;
+        _l.lastAssets += take;
+        emit LossToppedUp(take, debt - take);
+        _pullExact(take);
+    }
+
+    // ==========================================================================================
+    // Reserve (spec 6.5)
+
+    /// @inheritdoc IEscrow
+    function fundReserve(uint256 amount) external onlyOwner nonReentrant {
+        _accrue();
+        if (amount == 0) revert ZeroAmount();
+        _l.reserve += amount;
+        _l.lastAssets += amount;
+        emit ReserveFunded(amount);
+        _pullExact(amount);
+    }
+
+    /// @inheritdoc IEscrow
+    /// @dev A new proposal replaces the old one; proposing 0 cancels.
+    function proposeReserveWithdrawal(uint256 amount, uint8 reasonCode) external onlyOwner nonReentrant {
+        _accrue();
+        _l.pendingReserveWithdrawal = amount;
+        _l.pendingReserveReason = reasonCode;
+        emit ReserveWithdrawalProposed(amount, reasonCode);
+    }
+
+    /// @inheritdoc IEscrow
+    /// @dev The guardian confirms the exact proposal, so it cannot be swapped underneath them.
+    /// Pays the current payout address; blocked while a loss is active (docs/adr/0009).
+    function confirmReserveWithdrawal(uint256 amount, uint8 reasonCode) external onlyGuardian nonReentrant {
+        _accrue();
+        LedgerLib.withdrawReserve(_l, usdc, vault, amount, reasonCode, payoutAddress);
+    }
+
+    /// @dev Pulls exactly `amount` from the caller and checks the balance delta (deposit guard 12).
+    function _pullExact(uint256 amount) private {
+        uint256 before = usdc.balanceOf(address(this));
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        if (usdc.balanceOf(address(this)) - before != amount) revert TransferAmountMismatch();
     }
 
     // ==========================================================================================
@@ -580,11 +541,87 @@ contract Escrow is
     }
 
     function claimableOf(address account) external view returns (uint256) {
-        return
-            guestClaimable[account] + feeClaimable[account] + (account == payoutAddress ? ownerClaimable : 0);
+        return _l.guestClaimable[account] + _l.feeClaimable[account]
+            + (account == payoutAddress ? _l.ownerClaimable : 0);
     }
 
-    function totalAssets() external view returns (uint256) {
-        return _totalAssets();
+    function totalAssets() public view returns (uint256) {
+        return LedgerLib.totalAssets(usdc, vault);
+    }
+
+    /// @notice Assets below the booked baseline, not yet recognised as a loss.
+    function shortfall() external view returns (uint256) {
+        uint256 assets = totalAssets();
+        return _l.lastAssets > assets ? _l.lastAssets - assets : 0;
+    }
+
+    function pendingYieldOf(address account) external view returns (uint256) {
+        return _l.pendingGuestYield[account] + (account == payoutAddress ? _l.pendingOwnerYield : 0);
+    }
+
+    // ---------------------------------------------------------------------------- ledger getters
+
+    function totalOpenPrincipal() external view returns (uint256) {
+        return _l.totalOpenPrincipal;
+    }
+
+    function totalDisputed() external view returns (uint256) {
+        return _l.totalDisputed;
+    }
+
+    function totalPendingYield() external view returns (uint256) {
+        return _l.totalPendingYield;
+    }
+
+    function totalClaimable() external view returns (uint256) {
+        return _l.totalClaimable;
+    }
+
+    function reserve() external view returns (uint256) {
+        return _l.reserve;
+    }
+
+    function lossDebt() external view returns (uint256) {
+        return _l.lossDebt;
+    }
+
+    function accYieldPerUnit() external view returns (uint256) {
+        return _l.accYieldPerUnit;
+    }
+
+    function lastAssets() external view returns (uint256) {
+        return _l.lastAssets;
+    }
+
+    function yieldUnallocated() external view returns (uint256) {
+        return _l.yieldUnallocated;
+    }
+
+    function ownerClaimable() external view returns (uint256) {
+        return _l.ownerClaimable;
+    }
+
+    function pendingOwnerYield() external view returns (uint256) {
+        return _l.pendingOwnerYield;
+    }
+
+    function shortfallSince() external view returns (uint40) {
+        return _l.shortfallSince;
+    }
+
+    function pendingReserveWithdrawal() external view returns (uint256 amount, uint8 reasonCode) {
+        return (_l.pendingReserveWithdrawal, _l.pendingReserveReason);
+    }
+
+    function guestClaimable(address account) external view returns (uint256) {
+        return _l.guestClaimable[account];
+    }
+
+    function feeClaimable(address account) external view returns (uint256) {
+        return _l.feeClaimable[account];
+    }
+
+    function pendingGuestYield(address account) external view returns (uint256) {
+        return _l.pendingGuestYield[account];
     }
 }

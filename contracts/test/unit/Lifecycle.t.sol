@@ -279,7 +279,8 @@ contract LifecycleTest is EscrowTestBase {
 
     /// Disputes are C3's; the stored state is set directly to test freeze-from-DISPUTED (docs/adr/0007).
     function test_freeze_fromDisputedRestoresDisputed() public {
-        uint256 slot1 = uint256(keccak256(abi.encode(id, uint256(21)))) + 1; // Booking.state is byte 0
+        // `_bookings` is at slot 26 (forge inspect Escrow storageLayout); Booking.state is byte 0 of word 1.
+        uint256 slot1 = uint256(keccak256(abi.encode(id, uint256(26)))) + 1;
         bytes32 word = vm.load(address(escrow), bytes32(slot1));
         vm.store(
             address(escrow),

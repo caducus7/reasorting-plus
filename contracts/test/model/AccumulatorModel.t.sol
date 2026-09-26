@@ -181,7 +181,11 @@ contract AccumulatorModelTest is Test {
             } else {
                 m.deposit(amt);
             }
-            assertGe(m.assets() + m.lossDebt() + m.shortfall(), m.liabilities(), "solvency incl. debt and shortfall");
+            assertGe(
+                m.assets() + m.lossDebt() + m.shortfall(),
+                m.liabilities(),
+                "solvency incl. debt and shortfall"
+            );
             // Yield ever credited (still owed + already paid) never exceeds real gains net of real
             // losses, counting losses not yet absorbed (lossDebt) or not yet recognised (shortfall).
             assertLe(

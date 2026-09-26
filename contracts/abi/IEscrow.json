@@ -78,6 +78,37 @@
   },
   {
     "type": "function",
+    "name": "confirmReserveWithdrawal",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "reasonCode",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "deploy",
+    "inputs": [
+      {
+        "name": "assets",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "deposit",
     "inputs": [
       {
@@ -333,6 +364,19 @@
   },
   {
     "type": "function",
+    "name": "fundReserve",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "getBooking",
     "inputs": [
       {
@@ -548,10 +592,36 @@
   },
   {
     "type": "function",
+    "name": "observeShortfall",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "pauseDeposits",
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "pendingYieldOf",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -574,6 +644,24 @@
         "name": "feeBps",
         "type": "uint16",
         "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "proposeReserveWithdrawal",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "reasonCode",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ],
     "outputs": [],
@@ -671,6 +759,26 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recogniseLoss",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "redeem",
+    "inputs": [
+      {
+        "name": "assets",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -790,6 +898,32 @@
         "name": "bookingId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "shortfall",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "topUpLoss",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -1365,6 +1499,25 @@
   },
   {
     "type": "event",
+    "name": "PendingYieldReleased",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "QuoteSignerRotated",
     "inputs": [
       {
@@ -1417,6 +1570,25 @@
   },
   {
     "type": "event",
+    "name": "ReserveWithdrawalProposed",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reasonCode",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "ReserveWithdrawn",
     "inputs": [
       {
@@ -1436,6 +1608,25 @@
   },
   {
     "type": "event",
+    "name": "ShortfallCleared",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ShortfallObserved",
+    "inputs": [
+      {
+        "name": "shortfall",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "YieldAccrued",
     "inputs": [
       {
@@ -1445,7 +1636,38 @@
         "internalType": "uint256"
       },
       {
+        "name": "toReserve",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
         "name": "accYieldPerUnit",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "YieldDeferred",
+    "inputs": [
+      {
+        "name": "bookingId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "guestYield",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "ownerYield",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -1466,6 +1688,16 @@
   {
     "type": "error",
     "name": "BpsOutOfRange",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BufferBreached",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "DeployCapExceeded",
     "inputs": []
   },
   {
@@ -1520,6 +1752,26 @@
   },
   {
     "type": "error",
+    "name": "LossWindowOpen",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoLossDebt",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoLossToRecognise",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoVault",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotCancellable",
     "inputs": []
   },
@@ -1555,6 +1807,11 @@
   },
   {
     "type": "error",
+    "name": "NotRebalancer",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "PriceBelowFloor",
     "inputs": []
   },
@@ -1575,7 +1832,22 @@
   },
   {
     "type": "error",
+    "name": "ReserveInsufficient",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReserveProposalMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "SettleTooEarly",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ShortfallPending",
     "inputs": []
   },
   {
@@ -1590,7 +1862,17 @@
   },
   {
     "type": "error",
+    "name": "VaultMintedNoShares",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAmount",
     "inputs": []
   },
   {

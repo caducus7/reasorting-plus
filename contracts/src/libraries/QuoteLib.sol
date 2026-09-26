@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {Cutoff, Quote} from "../interfaces/IEscrow.sol";
 
 /// @notice EIP-712 struct hashing and policy-curve rules for `Quote` (spec 4.1, 4.2 guard 11, 4.3).
+/// `hash` and `validCurve` are external: the library is deployed once and linked into the Escrow
+/// implementation to keep it under EIP-170 (docs/adr/0010).
 library QuoteLib {
     uint16 internal constant BPS = 10_000;
     uint256 internal constant MAX_CUTOFFS = 8;
@@ -18,7 +20,7 @@ library QuoteLib {
     );
 
     /// @notice EIP-712 `hashStruct(quote)`, which is also the bookingId (spec 4.1).
-    function hash(Quote calldata q) internal pure returns (bytes32) {
+    function hash(Quote calldata q) external pure returns (bytes32) {
         bytes32[] memory cutoffHashes = new bytes32[](q.cutoffs.length);
         for (uint256 i; i < q.cutoffs.length; ++i) {
             cutoffHashes[i] =
@@ -44,7 +46,7 @@ library QuoteLib {
     /// @notice Guard 11: 1..8 cutoffs, strictly increasing and all before check-in, refund
     /// non-increasing and <= 100%, and `finalBps` no higher than the last cutoff.
     function validCurve(Cutoff[] calldata cutoffs, uint16 finalBps, uint40 checkInUtc)
-        internal
+        external
         pure
         returns (bool)
     {
