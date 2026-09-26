@@ -12,3 +12,6 @@ contracts/broadcast/*/31337/
 node_modules/
 dist/
 coverage/
+
+# Local agent worktrees (tooling, never committed)
+.claude/worktrees/
