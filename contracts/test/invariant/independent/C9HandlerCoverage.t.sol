@@ -96,6 +96,8 @@ contract C9HandlerCoverage is Test {
         _add("ok:lossToDebt");
 
         uint256[] memory total = new uint256[](tags.length);
+        uint256 ambiguity; // frozenTotal capped at MAX_FREEZE_DURATION on unfreeze (informational)
+        uint256 rule4; // pause/unpause skipped accrue() (reported finding)
         uint256 episodes = 30;
         for (uint256 e; e < episodes; e++) {
             C9Handler h = new C9Handler();
@@ -109,10 +111,14 @@ contract C9HandlerCoverage is Test {
                 total[k] += h.okCountOf(tags[k]);
             }
             _assertClean(h);
+            ambiguity += h.viol(h.K_AMBIG());
+            rule4 += h.viol(h.K_RULE4());
         }
         for (uint256 k; k < tags.length; k++) {
             console2.log(tags[k], total[k]);
         }
+        console2.log("info:frozenTotalCappedOnUnfreeze", ambiguity);
+        console2.log("finding:pauseOrUnpauseSkippedAccrue", rule4);
         for (uint256 k; k < tags.length; k++) {
             assertGt(total[k], 0, string.concat("path never exercised: ", tags[k]));
         }
