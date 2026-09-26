@@ -1,0 +1,14 @@
+# Secrets (CLAUDE.md section 9)
+.env
+.env.*
+!.env.example
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+
+# Node
+node_modules/
+dist/
+coverage/
