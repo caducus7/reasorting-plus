@@ -193,3 +193,28 @@ EIP-712 digest.
   booking.
 - The fee expiry cap `pendingFeeAt - 60s` (5.2) together with guard 9 prevents fee straddling.
 - 15.2's corrected 46-day window matches section 8's arithmetic.
+
+---
+
+## Status after C0 and C1
+
+| # | Status | Where |
+|---|---|---|
+| 1, 2 | **Open.** Blocks C2 | Needs the project owner's decision |
+| 3 | Resolved by default: address-independent owner claim bucket | ADR 0007 §1 |
+| 4 | Resolved by default: admin approves terms, owner creates | ADR 0007 §2 |
+| 5 | Resolved by default: freeze from DISPUTED, restore on unfreeze | ADR 0007 §3 |
+| 6 | Resolved by default: `claimableAtomic`, `claimCalls`, cancel + claim bundle | ADR 0003 |
+| 7 | Resolved by default: `state` + `outcome` | ADR 0002 |
+| 8 | Resolved by default: `maxOpenPrincipalAtomic` cap | ADR 0007 §4 |
+| 9 | Resolved by default: 30-day cumulative freeze budget, then permissionless unfreeze | ADR 0007 §3 |
+| 10 | Resolved by default: policy on booking response | ADR 0004 |
+| 11 | Open. Reserve withdrawal recipient (C2) | C2 |
+| 12 | Open. C9 should start after C3's interim handoff | briefs/README.md |
+| 13 | Resolved: promote before overwrite; snapshot effective arbitrator | ADR 0007 §5 |
+| 14 | Kept spec order; documented | handoffs/C1.md |
+| 15 | Resolved: full event set declared in `IEscrow` | ADR 0007 §7 |
+| 16 | Open (low); before a second owner | |
+| 17, 18 | Open. Spec text fixes | |
+| New | Zero price floor disabled the signer bound: now mandatory | ADR 0007 §8 |
+| New | Base docs print Base Sepolia USDC with a failing checksum (`…3dCF7c`); correct is `…3dCF7e` | DeployBaseSepolia.s.sol |

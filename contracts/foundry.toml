@@ -1,0 +1,44 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.35"   # pinned; see docs/adr/0006
+evm_version = "cancun"    # Base supports Cancun (EIP-1153 transient storage)
+optimizer = true
+optimizer_runs = 200
+via_ir = false            # avoids the via-IR-only bugs listed for 0.8.35
+bytecode_hash = "none"
+cbor_metadata = true
+fs_permissions = [{ access = "read", path = "./" }]
+remappings = [
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+  "forge-std/=lib/forge-std/src/",
+]
+
+[profile.default.fuzz]
+runs = 1000
+
+[profile.default.invariant]
+runs = 256
+depth = 50
+fail_on_revert = false
+
+[profile.ci.fuzz]
+runs = 10000
+
+[profile.ci.invariant]
+runs = 1000
+depth = 100
+
+[rpc_endpoints]
+base = "${BASE_RPC_URL}"
+base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
+
+[fmt]
+line_length = 110
+
+[lint]
+lint_on_build = false
