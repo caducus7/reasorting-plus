@@ -59,5 +59,6 @@ contract YieldInvariantsTest is YieldTestBase {
         console2.log("debtStates", handler.nDebtStates(), "settled", handler.nSettled());
         console2.log("deferred", handler.nDeferred(), "ownerBlocked", handler.nOwnerBlocked());
         console2.log("reserveWithdrawn", handler.nReserveWithdrawn(), "gain", handler.ghostGain());
+        console2.log("disputesOpened", handler.nDisputesOpened(), "resolved", handler.nDisputesResolved());
     }
 }

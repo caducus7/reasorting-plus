@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {Escrow} from "../../src/Escrow.sol";
 import {EscrowFactory} from "../../src/EscrowFactory.sol";
-import {IEscrowEvents, Quote, Cutoff, BookingState} from "../../src/interfaces/IEscrow.sol";
+import {IEscrowEvents, Quote, Cutoff, BookingState, Dispute} from "../../src/interfaces/IEscrow.sol";
 import {MockUSDC, MockVault} from "../utils/Mocks.sol";
 
 /// @notice Random valid sequences over bookings AND the yield machinery: vault gains, losses and
@@ -49,6 +49,8 @@ contract YieldHandler is Test {
     uint256 public nDeferred;
     uint256 public nOwnerBlocked;
     uint256 public nReserveWithdrawn;
+    uint256 public nDisputesOpened;
+    uint256 public nDisputesResolved;
 
     constructor(
         Escrow e,
@@ -194,6 +196,72 @@ contract YieldHandler is Test {
         } catch {
             nOwnerBlocked++;
         }
+    }
+
+    // ------------------------------------------------------------------ disputes (C3)
+
+    /// Scans from a random start for a booking that can still be disputed, moving time to its
+    /// check-out if needed, so disputes happen often enough to matter.
+    function openDispute(uint256 seed, uint256 contested) external {
+        uint256 n = ids.length;
+        bytes32 id;
+        bool found;
+        for (uint256 k; k < n && !found; ++k) {
+            id = ids[(seed % n + k) % n];
+            found = !done[id] && escrow.getBooking(id).state == BookingState.ESCROWED
+                && block.timestamp < uint256(checkOutOf[id]) + 72 hours;
+        }
+        if (!found) return;
+        if (block.timestamp < checkOutOf[id]) vm.warp(checkOutOf[id]); // move to delivery
+        contested = bound(contested, 1, priceOf[id]);
+        vm.recordLogs();
+        vm.prank(guestOf[id]);
+        escrow.openDispute(id, contested, keccak256("e"));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == IEscrowEvents.DisputeOpened.selector) {
+                (,,,, uint256 y,) =
+                    abi.decode(logs[i].data, (uint256, bytes32, uint256, uint256, uint256, address));
+                ghostYieldCrystallised += y;
+            }
+        }
+        nDisputesOpened++;
+    }
+
+    function resolveDispute(uint256 seed, uint256 bps, uint256 reason, bool byDefault) external {
+        uint256 n = ids.length;
+        bytes32 id;
+        bool found;
+        for (uint256 k; k < n && !found; ++k) {
+            id = ids[(seed % n + k) % n];
+            found = escrow.getBooking(id).state == BookingState.DISPUTED;
+        }
+        if (!found) return;
+        uint16 guestBps = uint16(bound(bps, 0, 10_000));
+        vm.recordLogs();
+        if (byDefault) {
+            uint256 deadline = escrow.disputeDeadline(id);
+            if (block.timestamp < deadline) vm.warp(deadline);
+            escrow.resolveByDefault(id);
+            guestBps = 0;
+        } else {
+            vm.prank(escrow.getBooking(id).arbitrator);
+            escrow.resolve(id, guestBps, uint8(reason % 7));
+        }
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == IEscrowEvents.DisputeResolved.selector) {
+                (,, uint256 refund,,,, uint256 guestY,,) = abi.decode(
+                    logs[i].data,
+                    (uint16, uint8, uint256, uint256, uint256, uint256, uint256, uint256, address)
+                );
+                uint256 c = escrow.getDispute(id).contestedAtomic;
+                if (refund != (c * guestBps + 9_999) / 10_000) _flag("dispute refund != spec formula");
+                if (guestBps != 0 && guestY != 0) _flag("guest yield on a guest-won dispute (D3)");
+                _credit(id, refund + guestY);
+            }
+        }
+        nDisputesResolved++;
     }
 
     // ------------------------------------------------------------------ yield machinery

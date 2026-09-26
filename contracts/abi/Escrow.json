@@ -363,6 +363,25 @@
   },
   {
     "type": "function",
+    "name": "disputeDeadline",
+    "inputs": [
+      {
+        "name": "bookingId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "effectiveArbitrator",
     "inputs": [],
     "outputs": [
@@ -617,6 +636,47 @@
             "name": "refundBps",
             "type": "uint16",
             "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getDispute",
+    "inputs": [
+      {
+        "name": "bookingId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct Dispute",
+        "components": [
+          {
+            "name": "contestedAtomic",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "yieldAtomic",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "openedAt",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "frozenAtOpen",
+            "type": "uint32",
+            "internalType": "uint32"
           }
         ]
       }
@@ -895,6 +955,29 @@
     "type": "function",
     "name": "observeShortfall",
     "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "openDispute",
+    "inputs": [
+      {
+        "name": "bookingId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "contestedAtomic",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -1312,6 +1395,42 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "resolve",
+    "inputs": [
+      {
+        "name": "bookingId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "guestBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "reasonCode",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "resolveByDefault",
+    "inputs": [
+      {
+        "name": "bookingId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -1904,6 +2023,30 @@
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
+      },
+      {
+        "name": "uncontestedOwnerPrincipal",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "uncontestedFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "y",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "feeRecipient",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -2416,6 +2559,16 @@
   },
   {
     "type": "error",
+    "name": "DisputeTooLate",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "DisputeWindowOpen",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EnforcedPause",
     "inputs": []
   },
@@ -2451,6 +2604,11 @@
   },
   {
     "type": "error",
+    "name": "InvalidContested",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidCutoffs",
     "inputs": []
   },
@@ -2467,6 +2625,11 @@
   {
     "type": "error",
     "name": "InvalidQuoteSignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidReasonCode",
     "inputs": []
   },
   {
@@ -2501,7 +2664,22 @@
   },
   {
     "type": "error",
+    "name": "NotArbitrator",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotCancellable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotDelivered",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotDisputed",
     "inputs": []
   },
   {

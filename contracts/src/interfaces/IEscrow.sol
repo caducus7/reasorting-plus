@@ -35,6 +35,27 @@ enum BookingState {
 }
 
 /// @notice How a booking reached SETTLED. Mirrors the `/v1` `outcome` field (docs/adr/0002).
+/// @notice Fixed dispute reason codes (spec 7). `DEFAULT_TIMEOUT` is reserved for `resolveByDefault`;
+/// arbitrators use the others (docs/adr/0011).
+enum DisputeReason {
+    NOT_AS_DESCRIBED,
+    ACCESS_OR_CHECK_IN_FAILURE,
+    CLEANLINESS_OR_MAINTENANCE,
+    SAFETY_OR_HEALTH,
+    AMENITY_MISSING,
+    BILLING_ERROR,
+    OTHER,
+    DEFAULT_TIMEOUT
+}
+
+/// @notice Per-booking dispute record (C3). The uncontested part settles at open.
+struct Dispute {
+    uint256 contestedAtomic;
+    uint256 yieldAtomic; // booking yield crystallised at open, split at resolution
+    uint40 openedAt;
+    uint32 frozenAtOpen; // booking.frozenTotal when opened; later freezes extend the deadline
+}
+
 enum Outcome {
     COMPLETED,
     CANCELLED_BY_GUEST,
@@ -113,7 +134,17 @@ interface IEscrowEvents {
     event Claimed(address indexed account, uint256 requested, uint256 paid);
 
     // --- disputes (C3) ---
-    event DisputeOpened(bytes32 indexed bookingId, uint256 contestedAtomic, bytes32 evidenceHash);
+    /// @dev Carries the uncontested settlement figures (refund 0) and the crystallised yield, so the
+    /// ledger is rebuilt without calls (docs/adr/0011).
+    event DisputeOpened(
+        bytes32 indexed bookingId,
+        uint256 contestedAtomic,
+        bytes32 evidenceHash,
+        uint256 uncontestedOwnerPrincipal,
+        uint256 uncontestedFee,
+        uint256 y,
+        address feeRecipient
+    );
     event DisputeResolved(
         bytes32 indexed bookingId,
         uint16 guestBps,
@@ -208,6 +239,15 @@ interface IEscrowErrors {
     error ReserveProposalMismatch();
     error ZeroAmount();
     error VaultMintedNoShares();
+
+    // disputes (C3)
+    error NotDelivered();
+    error DisputeTooLate();
+    error InvalidContested();
+    error NotDisputed();
+    error NotArbitrator();
+    error InvalidReasonCode();
+    error DisputeWindowOpen();
 }
 
 interface IEscrow is IEscrowEvents, IEscrowErrors {
@@ -255,6 +295,11 @@ interface IEscrow is IEscrowEvents, IEscrowErrors {
     function proposeReserveWithdrawal(uint256 amount, uint8 reasonCode) external; // owner
     function confirmReserveWithdrawal(uint256 amount, uint8 reasonCode) external; // guardian
 
+    // --- disputes (C3) ---
+    function openDispute(bytes32 bookingId, uint256 contestedAtomic, bytes32 evidenceHash) external; // guest
+    function resolve(bytes32 bookingId, uint16 guestBps, uint8 reasonCode) external; // booking's arbitrator
+    function resolveByDefault(bytes32 bookingId) external; // permissionless after the window
+
     // --- views ---
     function hashQuote(Quote calldata q) external pure returns (bytes32 bookingId);
     function quoteDigest(Quote calldata q) external view returns (bytes32);
@@ -268,4 +313,6 @@ interface IEscrow is IEscrowEvents, IEscrowErrors {
     function totalAssets() external view returns (uint256);
     function shortfall() external view returns (uint256);
     function pendingYieldOf(address account) external view returns (uint256);
+    function getDispute(bytes32 bookingId) external view returns (Dispute memory);
+    function disputeDeadline(bytes32 bookingId) external view returns (uint256);
 }

@@ -563,7 +563,8 @@ function resolveByDefault(bytes32 bookingId) external;   // permissionless after
   the owner with the fee applied to what the owner retains. Yield follows section 4.4: vested if
   `guestBps == 0`, otherwise the guest's share goes to the owner.
 - **Deadline default.** After `DISPUTE_WINDOW` (14 days) anyone may call `resolveByDefault`, which
-  resolves with `guestBps = 0`. An unresponsive arbitrator cannot strand funds.
+  resolves with `guestBps = 0`. An unresponsive arbitrator cannot strand funds. Time the booking
+  spends frozen after the dispute opens extends the deadline (ADR 0011).
 - **No recipient parameter.** `resolve` credits the booking's stored guest and the owner bucket
   (ADR 0007). A
   compromised arbitrator can misallocate one contested amount and nothing else.
@@ -835,4 +836,6 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | [0006](adr/0006-toolchain-and-dependencies.md) | Toolchain pins |
 | [0007](adr/0007-c1-defaults-for-review-findings.md) | 3.3 to 3.5, 4.2, 4.4, 4.5, 4.7, 12.3, 13: owner claim bucket, onboarding, freeze budget, value cap, price floor, timelock promotion |
 | [0008](adr/0008-yield-adapter-is-erc4626.md) | 6.6: adapter is ERC-4626 |
+| [0010](adr/0010-c2-accounting-structure.md) | 6.1 to 6.5: Ledger struct and linked libraries, pending-yield release, 1 USDC loss threshold, owner deferred yield absorbs losses |
+| [0011](adr/0011-disputes.md) | 7: reason enum, frozen time extends the dispute deadline, `DisputeOpened` figures |
 | [0009](adr/0009-loss-window-and-remaining-defaults.md) | 6.1, 6.4, 6.5, 4.5: high-water-mark baseline, shortfall gating, reserve recipient; bookingId keying off-chain |

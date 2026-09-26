@@ -17,13 +17,24 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {IEscrow, Quote, Cutoff, Booking, BookingState, Outcome, EscrowInit} from "./interfaces/IEscrow.sol";
+import {
+    IEscrow,
+    Quote,
+    Cutoff,
+    Booking,
+    BookingState,
+    Outcome,
+    EscrowInit,
+    Dispute,
+    DisputeReason
+} from "./interfaces/IEscrow.sol";
 import {IEscrowFactory} from "./interfaces/IEscrowFactory.sol";
 import {QuoteLib} from "./libraries/QuoteLib.sol";
 import {SettlementLib} from "./libraries/SettlementLib.sol";
 import {Params} from "./libraries/Params.sol";
 import {BookingLib} from "./libraries/BookingLib.sol";
 import {LedgerLib, Ledger} from "./libraries/LedgerLib.sol";
+import {DisputeLib} from "./libraries/DisputeLib.sol";
 
 /// @title Escrow
 /// @notice One per property owner, deployed by `EscrowFactory` as an EIP-1167 clone (docs/adr/0005).
@@ -81,6 +92,7 @@ contract Escrow is
     Ledger internal _l;
     mapping(bytes32 => Booking) internal _bookings;
     mapping(bytes32 => Cutoff[]) internal _cutoffs;
+    mapping(bytes32 => Dispute) internal _disputes; // C3
 
     // ------------------------------------------------------------------------------------------
 
@@ -246,6 +258,81 @@ contract Escrow is
         b = _bookings[bookingId];
         if (b.state == BookingState.NONE) revert UnknownBooking();
         if (b.state != BookingState.ESCROWED) revert BookingNotEscrowed();
+    }
+
+    // ==========================================================================================
+    // Disputes (spec 7; docs/adr/0011)
+
+    /// @inheritdoc IEscrow
+    /// @dev Guest only (D8). DELIVERED (check-out passed, stored state ESCROWED, not frozen) and
+    /// before checkOut + GRACE. 0 < contested <= principal.
+    function openDispute(bytes32 bookingId, uint256 contestedAtomic, bytes32 evidenceHash)
+        external
+        nonReentrant
+    {
+        _accrue();
+        _promoteTimelocks();
+        Booking storage b = _escrowed(bookingId);
+        if (block.timestamp < b.checkOutUtc) revert NotDelivered();
+        if (block.timestamp >= uint256(b.checkOutUtc) + Params.GRACE) revert DisputeTooLate();
+        if (msg.sender != b.guest) revert NotGuest();
+        if (contestedAtomic == 0 || contestedAtomic > b.principalAtomic) revert InvalidContested();
+        DisputeLib.open(
+            _l, b, _disputes[bookingId], bookingId, contestedAtomic, evidenceHash, factory.feeRecipient()
+        );
+    }
+
+    /// @inheritdoc IEscrow
+    /// @dev Only the arbitrator snapshotted on this booking (spec 3.4). `reasonCode` is a
+    /// `DisputeReason` other than DEFAULT_TIMEOUT.
+    function resolve(bytes32 bookingId, uint16 guestBps, uint8 reasonCode) external nonReentrant {
+        _accrue();
+        _promoteTimelocks();
+        Booking storage b = _disputed(bookingId);
+        if (msg.sender != b.arbitrator) revert NotArbitrator();
+        if (guestBps > Params.BPS) revert BpsOutOfRange();
+        if (reasonCode >= uint8(DisputeReason.DEFAULT_TIMEOUT)) revert InvalidReasonCode();
+        DisputeLib.resolve(
+            _l, b, _disputes[bookingId], bookingId, guestBps, reasonCode, factory.feeRecipient()
+        );
+    }
+
+    /// @inheritdoc IEscrow
+    /// @dev Permissionless once `disputeDeadline` has passed; resolves for the owner (guestBps 0),
+    /// so an unresponsive arbitrator cannot strand funds (spec 7).
+    function resolveByDefault(bytes32 bookingId) external nonReentrant {
+        _accrue();
+        _promoteTimelocks();
+        Booking storage b = _disputed(bookingId);
+        if (block.timestamp < disputeDeadline(bookingId)) revert DisputeWindowOpen();
+        DisputeLib.resolve(
+            _l,
+            b,
+            _disputes[bookingId],
+            bookingId,
+            0,
+            uint8(DisputeReason.DEFAULT_TIMEOUT),
+            factory.feeRecipient()
+        );
+    }
+
+    function _disputed(bytes32 bookingId) private view returns (Booking storage b) {
+        b = _bookings[bookingId];
+        if (b.state != BookingState.DISPUTED) revert NotDisputed();
+    }
+
+    /// @notice openedAt + DISPUTE_WINDOW, extended by time the booking spent frozen after the dispute
+    /// opened (ADR 0011). While a freeze is ongoing it is not yet included (and nothing can resolve).
+    /// 0 if the booking was never disputed.
+    function disputeDeadline(bytes32 bookingId) public view returns (uint256) {
+        Dispute storage d = _disputes[bookingId];
+        if (d.openedAt == 0) return 0;
+        return
+            uint256(d.openedAt) + Params.DISPUTE_WINDOW + (_bookings[bookingId].frozenTotal - d.frozenAtOpen);
+    }
+
+    function getDispute(bytes32 bookingId) external view returns (Dispute memory) {
+        return _disputes[bookingId];
     }
 
     // ==========================================================================================

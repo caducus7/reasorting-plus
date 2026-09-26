@@ -13,8 +13,8 @@ import {EscrowFactory} from "../src/EscrowFactory.sol";
 /// Deploy, with the owner's testnet wallet (never a raw key in a file):
 ///   forge script script/DeployBaseSepolia.s.sol --rpc-url $BASE_SEPOLIA_RPC_URL --account <keystore> --broadcast
 ///
-/// Deploys the linked libraries (QuoteLib, BookingLib, LedgerLib) by CREATE2 first; forge handles
-/// linking. ~10.2M gas in total on Base Sepolia (simulated).
+/// Deploys the linked libraries (QuoteLib, BookingLib, LedgerLib, DisputeLib) by CREATE2 first;
+/// forge handles linking. ~11.5M gas in total on Base Sepolia (simulated).
 ///
 /// Environment: FACTORY_ADMIN, FEE_RECIPIENT, GUARDIAN, ARBITRATOR (Safes before mainnet, spec 12.3);
 /// DEFAULT_VAULT optional (ERC-4626 over USDC, default none).
