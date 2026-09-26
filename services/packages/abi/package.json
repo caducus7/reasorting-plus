@@ -1,0 +1,23 @@
+{
+  "name": "@chain/abi",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "build": "tsc -p tsconfig.json",
+    "test": "node scripts/generate.mjs --check"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

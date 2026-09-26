@@ -14,6 +14,14 @@
     "./api/v1": {
       "types": "./dist/api/v1.d.ts",
       "default": "./dist/api/v1.js"
+    },
+    "./eip712": {
+      "types": "./dist/eip712.d.ts",
+      "default": "./dist/eip712.js"
+    },
+    "./api/openapi": {
+      "types": "./dist/api/openapi.d.ts",
+      "default": "./dist/api/openapi.js"
     }
   },
   "scripts": {
@@ -21,10 +29,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "viem": "^2.56.9",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
+    "fast-check": "^4.10.2",
     "typescript": "~5.9.3",
     "vitest": "^3.2.7"
   }

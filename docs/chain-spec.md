@@ -839,3 +839,4 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | [0010](adr/0010-c2-accounting-structure.md) | 6.1 to 6.5: Ledger struct and linked libraries, pending-yield release, 1 USDC loss threshold, owner deferred yield absorbs losses |
 | [0011](adr/0011-disputes.md) | 7: reason enum, frozen time extends the dispute deadline, `DisputeOpened` figures |
 | [0009](adr/0009-loss-window-and-remaining-defaults.md) | 6.1, 6.4, 6.5, 4.5: high-water-mark baseline, shortfall gating, reserve recipient; bookingId keying off-chain |
+| [0012](adr/0012-quote-service-policies.md) | 5.1 to 5.3: DST materialisation rules, holds and one live quote per offer, 900 s feed staleness, fee-straddle cap, 409 on offers (docs only), guest JWT claims (agent-workstream sign-off pending), shared calendar tables |
