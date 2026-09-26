@@ -28,6 +28,21 @@ loss recognition and the `lossDebt` state, `topUpLoss`, and the owner-funded res
 - Events `YieldAccrued`, `LossRecognised`, `LossRepaid`, `LossToppedUp`, `ReserveFunded`,
   `ReserveWithdrawn`.
 
+## Decided (ADR 0009, accepted); build exactly this
+
+- `accrue()` never lowers `lastAssets`. `assets < lastAssets` is an observed shortfall (record
+  `shortfallSince`); `recogniseLoss()` after the window is the only path that lowers it.
+- While a shortfall at or above `MIN_LOSS_ATOMIC` is observed, or `lossDebt > 0`: owner-only and
+  fee-only `claim()` revert, and `deploy` and reserve withdrawal revert. Guest claims proceed.
+- Reserve withdrawal pays the current `payoutAddress`.
+- Step-2 absorption debits `ownerClaimable` (ADR 0007: the owner bucket, not an address).
+- The yield adapter is ERC-4626 (ADR 0008). C1 already bounds claim pulls by `maxWithdraw`.
+- Escrow is ~19.7 KB of the 24 KB limit (C1 handoff). Measure before adding code; plan a library
+  split if needed.
+- Port `test/model/AccumulatorModel.t.sol`'s properties to the real Escrow: dip then recovery
+  credits nothing; the owner is blocked during the window; solvency including `lossDebt` and
+  shortfall; no phantom yield under fuzzing.
+
 ## Out of scope
 
 Adapters other than using `NullAdapter` and a test double (C4). Rebalancer logic (C8). Disputes

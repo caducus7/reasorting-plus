@@ -58,6 +58,12 @@ The checkout UI, the agent, email sending, magic-link issuance (all agent workst
 - End to end on Anvil: offer, then prepare, then submit `calls` as a test smart wallet, and the
   booking exists on-chain with the expected terms.
 
+## Decided
+
+- Keys are `(chainId, escrow, bookingId)` everywhere off-chain (ADR 0009 §5).
+- If you ever build a USDC permit, read `name()` and `version()` from chain: mainnet is
+  "USD Coin", Base Sepolia is "USDC" (ADR 0009 §6).
+
 ## Watch for
 
 - Never compute money with `number`.

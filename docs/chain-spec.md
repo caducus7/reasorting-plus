@@ -3,6 +3,7 @@
 **Status:** canonical and standalone. This is the only chain document agents read. It merges
 `booking-platform-spec-v2.md` with `chain-spec-v3-delta.md` and corrects four errors found in
 v3 during the merge (section 15.2). Where any earlier document disagrees, this one wins.
+Amended by the accepted ADRs listed in section 16; amended text is marked "(ADR NNNN)".
 
 **Scope:** the chain workstream only: contracts, quote service, indexer, channel sync,
 rebalancer, and the stub API. The guest agent, widget, checkout UI and owner dashboard are
@@ -165,6 +166,9 @@ ESCROWED ──cancelByGuest (now < checkOut)───────────�
 - `DELIVERED` is derived from time. Nobody asserts delivery.
 - `SETTLED` credits claimable balances. It never transfers.
 - `FROZEN` halts every transition on the booking, including time-derived delivery and settlement.
+  The guardian may freeze an `ESCROWED` or `DISPUTED` booking; unfreeze restores the frozen-from
+  state. Each booking has a cumulative 30-day freeze budget, after which anyone may unfreeze and it
+  cannot be frozen again (ADR 0007).
   It never moves funds. Time spent frozen does not extend `GRACE`; unfreeze restores `ESCROWED`
   and the booking follows the clock from there.
 - `cancelByGuest` is allowed until `checkOut`. Before `checkIn` the refund comes from the cutoffs;
@@ -283,9 +287,9 @@ else:
     guestY = 0
     ownerY = y
 
-claimable[guest]          += refund + guestY
-claimable[payoutAddress]  += ownerPrin + ownerY
-claimable[feeRecipient()] += fee
+guestClaimable[guest]           += refund + guestY
+ownerClaimable                  += ownerPrin + ownerY   // paid to the current payoutAddress (ADR 0007)
+feeClaimable[feeRecipient()]    += fee
 ```
 
 **Fee basis (D1).** On a completed stay `refund = 0`, so the fee is exactly `feeBps` of the booking
@@ -315,8 +319,9 @@ function claim() external;   // pays min(claimable[msg.sender], liquid available
 - `claim` redeems from the adapter when idle funds are short, bounded by `maxWithdrawable()`.
 - If the adapter cannot supply the full amount, it pays what it can and leaves the rest
   claimable. **Crediting never reverts.** Only the transfer can be partial.
-- While `lossDebt > 0`, claims by the owner's payout address and by the fee recipient revert.
-  Guest claims proceed, first from idle funds, then from the adapter.
+- While `lossDebt > 0` **or a shortfall is observed** (ADR 0009), only guest credits are paid. A
+  caller holding only owner or fee credits reverts. Guest claims proceed, first from idle funds, then
+  from the vault. A claim with nothing claimable returns 0 (ADR 0007).
 - A USDC-blacklisted address keeps its claim pending. There is no redirect function.
 
 ### 4.6 Settle
@@ -333,7 +338,8 @@ Minimum set: `EscrowCreated`, `BookingDeposited` (full terms), `BookingCancelled
 `LossRepaid`, `LossToppedUp`, `ReserveFunded`, `ReserveWithdrawn`, `FeeChangeProposed`
 (with `effectiveAt`), `FeeRecipientProposed`, `ArbitratorChangeProposed`, `GuestYieldBpsSet`,
 `MinNightlySet`, `PayoutAddressSet`, `QuoteSignerRotated`, `RebalancerSet`,
-`DepositsPaused`, `DepositsUnpaused`, `BookingFrozen`, `BookingUnfrozen`.
+`Paused`, `Unpaused` (OpenZeppelin Pausable, ADR 0007), `BookingFrozen`, `BookingUnfrozen`,
+`MaxDeployBpsSet`, `MaxOpenPrincipalSet`.
 
 ---
 
@@ -434,8 +440,9 @@ accrue():                          // first line of every state-changing functio
         if delta > 0:
             if totalOpenPrincipal == 0: reserve += delta
             else: accYieldPerUnit += delta * 1e18 / totalOpenPrincipal
-    if delta < 0: loss handling (section 6.4)
-    lastAssets = assets
+        lastAssets = assets
+    if delta < 0: shortfall observed; lastAssets is NOT lowered (ADR 0009). Only recogniseLoss(),
+                  after LOSS_CONFIRMATION_WINDOW, lowers it and books the loss (section 6.4).
 
 On every inflow or outflow (deposit, claim, reserve funding, top-up): update lastAssets by the
 exact amount moved, so only real yield counts as gain.
@@ -476,7 +483,7 @@ A loss is recognised when `adapter.totalAssets()` stays below its expected value
 While `lossDebt > 0`:
 
 - deposits revert (guard 5)
-- owner payout and fee recipient claims revert
+- owner payout and fee recipient claims revert (also while a shortfall is observed, ADR 0009)
 - `deploy` reverts; the rebalancer may only redeem
 - gains repay `lossDebt` before any distribution
 - yield credits on settlement are deferred into `totalPendingYield`
@@ -495,28 +502,24 @@ claim below the policy-derived figure.
 
 Optional and owner-funded via `fundReserve(amount)`. It also receives gains that accrue while
 `totalOpenPrincipal == 0`. Spending is limited to loss absorption. Withdrawal requires both owner and
-guardian and emits `ReserveWithdrawn(amount, reasonCode)`.
+guardian, pays the current `payoutAddress`, is blocked while `lossDebt > 0` or a shortfall is
+observed, and emits `ReserveWithdrawn(amount, reasonCode)` (ADR 0009).
 
 ### 6.6 Adapters
 
-```solidity
-interface IYieldAdapter {
-    function deposit(uint256 amount) external;                              // onlyEscrow
-    function withdraw(uint256 amount, address to) external returns (uint256 withdrawn);  // onlyEscrow
-    function totalAssets() external view returns (uint256);
-    function maxWithdrawable() external view returns (uint256);
-}
-```
+**The adapter is an ERC-4626 vault over USDC (ADR 0008).** The escrow holds vault shares; the
+factory rejects a vault whose `asset()` is not USDC. Withdrawals are bounded by
+`maxWithdraw(escrow)` and always use the escrow as both `receiver` and `owner`. Assets are
+`previewRedeem(balanceOf(escrow))`.
 
-`withdraw` returns the amount actually withdrawn, which may be less than requested. One adapter
-instance per escrow.
-
-- **NullAdapter:** holds idle. Used until yield is enabled.
-- **MockYieldAdapter:** settable rate and `maxWithdrawable`, plus a loss injector. Testnet and all
+- **No vault** (`address(0)`): funds stay idle. Replaces NullAdapter.
+- **Mock vault** (OpenZeppelin `ERC4626` with a yield and loss injector): settable rate and
+  withdrawal limit. Testnet and all
   demos run on this: months of accrual in minutes, and a liquidity crunch on demand. Aave testnet
   rates are meaningless; do not demo on them.
-- **AaveV3Adapter:** tested only on a Base mainnet fork. Before building, prototype both the raw
-  pool and an ERC-4626 vault wrapper on the fork and record the choice in an ADR. It must expose the
+- **Aave:** tested only on a Base mainnet fork. Prototype Aave's own ERC-4626 wrapper
+  (`AaveV3Base.USDC_STATA_TOKEN`) and a thin ERC-4626 adapter over the raw pool on the fork, and
+  record the choice in an ADR (D5). It must expose the
   market's available liquidity for the rebalancer (a view, off the interface).
 
 ### 6.7 Rebalancer policy (work package C8)
@@ -549,7 +552,7 @@ function resolve(bytes32 bookingId, uint16 guestBps, uint8 reasonCode) external;
 function resolveByDefault(bytes32 bookingId) external;   // permissionless after DISPUTE_WINDOW
 ```
 
-- The guest or the owner may open a dispute while the booking is `DELIVERED` and before
+- The guest (D8) may open a dispute while the booking is `DELIVERED` and before
   `checkOut + GRACE`.
 - `contestedAtomic <= principal`.
 - **Partial settlement.** On `openDispute`: run `accrue()`, crystallise the booking's yield `y` into
@@ -561,7 +564,8 @@ function resolveByDefault(bytes32 bookingId) external;   // permissionless after
   `guestBps == 0`, otherwise the guest's share goes to the owner.
 - **Deadline default.** After `DISPUTE_WINDOW` (14 days) anyone may call `resolveByDefault`, which
   resolves with `guestBps = 0`. An unresponsive arbitrator cannot strand funds.
-- **No recipient parameter.** `resolve` reads guest and payout address from the booking. A
+- **No recipient parameter.** `resolve` credits the booking's stored guest and the owner bucket
+  (ADR 0007). A
   compromised arbitrator can misallocate one contested amount and nothing else.
 - `reasonCode` is a fixed enumeration.
 - No dispute bond.
@@ -758,6 +762,9 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | `MIN_BUFFER_BPS` | 1,000 | Escrow constant |
 | `maxDeployBps` | 9,000 | Owner-set, <= 10,000 - `MIN_BUFFER_BPS` |
 | `LOSS_CONFIRMATION_WINDOW` | 6 hours | Escrow constant |
+| `MAX_FREEZE_DURATION` | 30 days, cumulative per booking | Escrow constant (ADR 0007) |
+| `minNightlyAtomic` | Set at escrow creation, never 0 | Owner-set (ADR 0007) |
+| `maxOpenPrincipalAtomic` | From the admin's approval | Owner-set cap, spec 12.3 (ADR 0007) |
 | `MAX_FEE_BPS` | 2,000 | Factory constant |
 | `maxFeeBps` | Set at escrow creation | Per escrow, immutable |
 | `FEE_CHANGE_DELAY`, `FEE_RECIPIENT_DELAY`, `ARBITRATOR_DELAY` | 7 days each | Factory constants |
@@ -816,3 +823,16 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | Principal deployed until 14 days before check-**out** (53 days in the example) | v2's rule is 14 days before check-**in** (46 days), and refund exposure peaks there | Economics recomputed: ~47 not ~61 on a 10,000 booking |
 | "Freeze unwind" as a non-vested outcome | Freeze never settles; it only halts | Removed |
 | Dispute outcomes vs vesting unspecified | Crystallise at open; vested only if `guestBps == 0` | Section 7 |
+
+---
+
+## 16. Accepted ADRs amending this spec
+
+| ADR | Amends |
+|---|---|
+| [0001](adr/0001-v1-wire-formats.md) to [0004](adr/0004-v1-booking-policy-fields.md) | 5.3 `/v1` wire formats, booking `state`/`outcome`, claim path, policy on bookings (agent-workstream sign-off pending) |
+| [0005](adr/0005-escrow-deployment-pattern.md) | 2: clones confirmed; proxies rejected |
+| [0006](adr/0006-toolchain-and-dependencies.md) | Toolchain pins |
+| [0007](adr/0007-c1-defaults-for-review-findings.md) | 3.3 to 3.5, 4.2, 4.4, 4.5, 4.7, 12.3, 13: owner claim bucket, onboarding, freeze budget, value cap, price floor, timelock promotion |
+| [0008](adr/0008-yield-adapter-is-erc4626.md) | 6.6: adapter is ERC-4626 |
+| [0009](adr/0009-loss-window-and-remaining-defaults.md) | 6.1, 6.4, 6.5, 4.5: high-water-mark baseline, shortfall gating, reserve recipient; bookingId keying off-chain |

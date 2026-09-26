@@ -26,6 +26,14 @@ and the D3 yield rule on resolution.
   `guestBps == 0`).
 - Events `DisputeOpened`, `DisputeResolved` with all figures.
 
+## Decided (ADR 0007, accepted)
+
+- Resolution credits the booking's stored guest and `ownerClaimable` (the owner bucket), never a
+  payout address read from the booking.
+- The guardian can freeze a DISPUTED booking; unfreeze returns it to DISPUTED. Decide in your
+  handoff whether frozen time counts toward `DISPUTE_WINDOW`. Recommended: it does not extend it,
+  matching `GRACE`.
+
 ## Out of scope
 
 Damage deposits or owner-opened disputes (blocked on D8). Arbitrator rotation for existing bookings

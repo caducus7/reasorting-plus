@@ -23,8 +23,8 @@ contracts/                  Foundry project
   src/
     EscrowFactory.sol
     Escrow.sol
-    interfaces/             IYieldAdapter.sol, IEscrow.sol, IEscrowFactory.sol
-    adapters/               NullAdapter.sol, MockYieldAdapter.sol, AaveV3Adapter.sol
+    interfaces/             IEscrow.sol, IEscrowFactory.sol (adapter = ERC-4626, ADR 0008)
+    adapters/               only if the Aave choice (D5) needs a thin ERC-4626 adapter
     libraries/              QuoteLib.sol, SettlementLib.sol, ...
   test/
     unit/                   one file per contract area
@@ -88,8 +88,8 @@ without checking.
 1. Guest refunds round **up**; fees and yield shares round **down**; owner takes remainders.
 2. Crediting a claim never reverts. Only the transfer may be partial.
 3. No function takes a recipient address for escrowed funds. Recipients come from stored booking
-   data or stored roles. The one exception is `IYieldAdapter.withdraw(amount, to)`, which is
-   `onlyEscrow` and is always called with the escrow itself as `to`; test that.
+   data or stored roles. The one exception is the vault's ERC-4626 `withdraw(assets, receiver,
+   owner)`, which the escrow always calls with itself as `receiver` and `owner`; test that.
 4. `accrue()` is the first call in every state-changing escrow function.
 5. Every inflow and outflow updates `lastAssets` by the exact amount moved.
 6. Terms on a booking (price, cutoffs, `feeBps`, `guestYieldBps`, arbitrator) never change after
@@ -104,8 +104,9 @@ without checking.
 |---|---|---|
 | Guest's yield share goes to the owner on cancellation, owner cancellation, and guest-won disputes | Decided by the project owner (D3) | 4.4 |
 | `resolve` has no recipient parameter | Bounds a compromised arbitrator to one contested amount | 7 |
-| Both `MockYieldAdapter` and `AaveV3Adapter` exist | Mock is the demo and testnet surface; fork is where correctness is proven. Never merge them | 6.6 |
-| Owner and fee recipient cannot claim while `lossDebt > 0` | Guests are paid before anyone else during a loss | 6.4 |
+| Both a mock ERC-4626 vault and the Aave ERC-4626 path exist | Mock is the demo and testnet surface; fork is where correctness is proven. Never merge them | 6.6 |
+| Owner and fee recipient cannot claim while `lossDebt > 0` or a shortfall is observed | Guests are paid before anyone else during a loss | 6.4, ADR 0009 |
+| `accrue()` does not lower `lastAssets` on a dip | Otherwise a recovery is paid out as phantom yield | 6.1, ADR 0009 |
 | No on-chain overlap check | Availability must include external channels, which the chain cannot see | 4.2, 9 |
 | Quote `feeBps` must **equal** the live fee, not be `<=` it | Otherwise the owner's signer could waive the platform fee | 4.2 |
 | Fee recipient is read at settlement, but arbitrator is snapshotted at deposit | Different threat models; both deliberate | 3.4 |
@@ -132,7 +133,7 @@ Do not change it.
 
 - Build only what your brief lists. Do not edit files owned by another package, except to fix a
   compile break, which you report.
-- Any change to a shared interface (`IEscrow`, `IYieldAdapter`, event signatures, the `/v1` API
+- Any change to a shared interface (`IEscrow`, `IEscrowFactory`, event signatures, the `/v1` API
   schema, DB schema consumed by another app) requires an ADR in `docs/adr/` and a flag in your
   handoff. The Service API in spec 5.3 is also the other workstream's contract: never change it
   unilaterally.

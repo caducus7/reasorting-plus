@@ -6,7 +6,8 @@ with: "Read CLAUDE.md, then briefs/<file>. Do only that package."
 | Wave | Packages | Starts when |
 |---|---|---|
 | 1 | C0, C1 | Immediately, in parallel |
-| 2 | C2, C3, C5, C9 | C1 has published its interfaces and events (interim handoff) |
+| 2 | C2, C3, C5 | C1 has published its interfaces and events (interim handoff) |
+| 2b | C9 | C3's interim handoff (dispute ABI published), per ADR 0009 |
 | 3 | C4, C6 | C2 interface stable (C4); C1 to C3 ABIs stable (C6) |
 | 4 | C7, C8 | C6 projections and head events available |
 

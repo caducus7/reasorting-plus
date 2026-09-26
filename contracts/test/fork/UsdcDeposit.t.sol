@@ -6,7 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {Escrow} from "../../src/Escrow.sol";
 import {EscrowFactory} from "../../src/EscrowFactory.sol";
-import {Quote, Cutoff} from "../../src/interfaces/IEscrow.sol";
+import {Quote, Cutoff, IEscrowErrors} from "../../src/interfaces/IEscrow.sol";
 
 interface IFiatTokenV2_2 {
     function name() external view returns (string memory);
@@ -45,8 +45,10 @@ contract UsdcDepositForkTest is Test {
             return;
         }
         vm.createSelectFork(rpc, FORK_BLOCK);
-        (signer, signerKey) = makeAddrAndKey("signer");
-        (guest, guestKey) = makeAddrAndKey("guest");
+        // Keys named per fork: well-known labels ("signer") have EIP-7702 delegations on mainnet.
+        (signer, signerKey) = makeAddrAndKey("c1-fork-quote-signer");
+        (guest, guestKey) = makeAddrAndKey("c1-fork-guest");
+        require(signer.code.length == 0 && guest.code.length == 0, "fork test key has code on Base");
         Escrow impl = new Escrow();
         factory = new EscrowFactory(
             admin, USDC, address(impl), makeAddr("feeTo"), makeAddr("guardian"), makeAddr("arb"), address(0)
@@ -149,6 +151,26 @@ contract UsdcDepositForkTest is Test {
         vm.prank(guest);
         escrow.depositWithPermit(q, sig, deadline, v, r, s);
         assertEq(IERC20(USDC).balanceOf(address(escrow)), q.priceAtomic);
+    }
+
+    /// A quote signer whose EOA carries an EIP-7702 delegation is validated through ERC-1271 on the
+    /// delegate (OpenZeppelin SignatureChecker), so plain ECDSA quotes from it fail. Ops rule: the
+    /// KMS quote-signer EOA must never be delegated. The address below is the well-known
+    /// makeAddr("signer") key, delegated on Base mainnet by a third party (code 0xef0100...).
+    function test_eip7702DelegatedSignerRejectsEcdsaQuotes() public {
+        (address delegated, uint256 delegatedKey) = makeAddrAndKey("signer");
+        assertEq(delegated, 0x6E12D8C87503D4287c294f2Fdef96ACd9DFf6bd2);
+        assertEq(bytes3(delegated.code), bytes3(0xef0100), "expected a 7702 delegation designator");
+        vm.prank(owner);
+        escrow.setQuoteSigner(delegated);
+        Quote memory q = _quote();
+        deal(USDC, guest, q.priceAtomic);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(delegatedKey, escrow.quoteDigest(q));
+        vm.startPrank(guest);
+        IERC20(USDC).approve(address(escrow), q.priceAtomic);
+        vm.expectRevert(IEscrowErrors.InvalidQuoteSignature.selector);
+        escrow.deposit(q, abi.encodePacked(r, s, v));
+        vm.stopPrank();
     }
 
     function test_cancelAndClaimRealUsdc() public {
