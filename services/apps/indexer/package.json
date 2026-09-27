@@ -5,17 +5,22 @@
   "type": "module",
   "scripts": {
     "test": "tsc -p tsconfig.json && vitest run",
-    "test:anvil": "vitest run --dir test/anvil"
+    "test:anvil": "vitest run -c vitest.anvil.config.ts"
   },
   "dependencies": {
     "@chain/abi": "workspace:*",
     "@chain/shared": "workspace:*",
+    "hono": "^4.13.9",
+    "luxon": "^3.7.2",
+    "pg": "^8.23.0",
     "ponder": "0.17.12",
     "viem": "^2.56.9",
-    "hono": "^4.13.9"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/luxon": "^3.7.5",
     "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
     "typescript": "~5.9.3",
     "vitest": "^3.2.7"
   }

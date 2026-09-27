@@ -24,7 +24,9 @@ const num = (v: unknown) => Number(v as number | bigint);
 const addr = (v: unknown) => getAddress(v as string);
 
 /** Events that change nothing the projections hold. */
-const IGNORED = new Set(["Initialized", "EIP712DomainChanged"]);
+/** Events that change nothing the projections hold (OZ bookkeeping; a 2-step transfer is final on
+ * OwnershipTransferred). */
+const IGNORED = new Set(["Initialized", "EIP712DomainChanged", "OwnershipTransferStarted"]);
 
 export function newEscrowRow(chainId: number, escrow: Address): EscrowRow {
   return {
@@ -54,6 +56,7 @@ export function newEscrowRow(chainId: number, escrow: Address): EscrowRow {
     realisedGain: 0n,
     crystallisedYield: 0n,
     lastDeferred: null,
+    updatedBlock: 0n,
   };
 }
 
@@ -178,6 +181,7 @@ export async function reduce(store: Store, ev: ChainEvent): Promise<ReduceResult
         depositTimestamp: ev.timestamp,
         settledBlock: null,
         settledTimestamp: null,
+        updatedBlock: ev.blockNumber,
       };
       if (await store.getBooking(escrow, id)) flag("DUPLICATE_BOOKING", `booking ${id} deposited twice`);
       break;
@@ -447,6 +451,9 @@ export async function reduce(store: Store, ev: ChainEvent): Promise<ReduceResult
     case "MaxOpenPrincipalSet":
       e.maxOpenPrincipalAtomic = big(args.maxOpenPrincipalAtomic);
       break;
+    case "OwnershipTransferred":
+      e.owner = addr(args.newOwner);
+      break;
     case "Paused":
       e.paused = true;
       break;
@@ -459,8 +466,8 @@ export async function reduce(store: Store, ev: ChainEvent): Promise<ReduceResult
 
   if (legs.reduce((s, l) => s + l.amount, 0n) !== 0n) flag("UNBALANCED", `${ev.name} postings do not balance`);
   await store.post(escrow, ev, key, legs);
-  if (bookingOut) await store.putBooking(bookingOut);
-  await store.putEscrow(e);
+  if (bookingOut) await store.putBooking({ ...bookingOut, updatedBlock: ev.blockNumber });
+  await store.putEscrow({ ...e, updatedBlock: ev.blockNumber });
   await store.markSeen(key, ev);
   return { duplicate: false, legs, anomalies };
 }

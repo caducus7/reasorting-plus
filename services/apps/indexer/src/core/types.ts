@@ -52,6 +52,8 @@ export type EscrowRow = {
   crystallisedYield: bigint;
   /** `${txHash}:${bookingId}` of the last YieldDeferred, checked against the settlement after it. */
   lastDeferred: string | null;
+  /** Block of the last event that touched this row (replay diff compares rows at a fixed block). */
+  updatedBlock: bigint;
 };
 
 export type BookingRow = {
@@ -93,6 +95,7 @@ export type BookingRow = {
   depositTimestamp: bigint;
   settledBlock: bigint | null;
   settledTimestamp: bigint | null;
+  updatedBlock: bigint;
 };
 
 export type JournalRow = {
