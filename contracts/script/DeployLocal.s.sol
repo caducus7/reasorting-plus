@@ -28,8 +28,9 @@ contract DeployLocal is Script {
         vm.startBroadcast(ADMIN_KEY);
         MockUSDC usdc = new MockUSDC();
         Escrow impl = new Escrow();
-        EscrowFactory factory =
-            new EscrowFactory(vm.addr(ADMIN_KEY), address(usdc), address(impl), FEE_RECIPIENT, GUARDIAN, ARBITRATOR, address(0));
+        EscrowFactory factory = new EscrowFactory(
+            vm.addr(ADMIN_KEY), address(usdc), address(impl), FEE_RECIPIENT, GUARDIAN, ARBITRATOR, address(0)
+        );
         factory.approveOwner(owner, 2_000, 500, 1_000_000e6);
         BatchWallet wallet = new BatchWallet();
         vm.stopBroadcast();

@@ -282,7 +282,11 @@ contract DisputeTest is YieldTestBase {
         escrow.openDispute(id, 1, keccak256("e"));
         vm.warp(block.timestamp + 5 days);
         _open(1);
-        assertEq(escrow.disputeDeadline(id), block.timestamp + 14 days, "the earlier freeze adds nothing after opening");
+        assertEq(
+            escrow.disputeDeadline(id),
+            block.timestamp + 14 days,
+            "the earlier freeze adds nothing after opening"
+        );
     }
 
     // ================================================================== brief test 1: conservation
@@ -334,7 +338,9 @@ contract DisputeTest is YieldTestBase {
     /// crystallised yield) of bookings that snapshotted it, and only to that booking's guest, the owner
     /// bucket and the fee recipient. Bookings snapshotting another arbitrator, undisputed bookings and
     /// already-settled uncontested parts are untouched.
-    function testFuzz_arbitratorBlastRadius(uint256[4] memory contestedSeed, uint256[12] memory actions) public {
+    function testFuzz_arbitratorBlastRadius(uint256[4] memory contestedSeed, uint256[12] memory actions)
+        public
+    {
         _blastSetup(contestedSeed);
         _blastSnapshot();
         for (uint256 k; k < actions.length; ++k) {
@@ -414,7 +420,8 @@ contract DisputeTest is YieldTestBase {
         uint256 moved = escrow.totalClaimable() - bTotalBefore;
         assertEq(moved, resolved, "claimable grew by exactly the resolved contested amounts and yield");
         uint256 toKnown = (escrow.ownerClaimable() - bOwnerBefore) + (escrow.feeClaimable(feeTo) - bFeeBefore)
-            + (escrow.guestClaimable(bg[0]) - bGuestBefore[0]) + (escrow.guestClaimable(bg[1]) - bGuestBefore[1]);
+            + (escrow.guestClaimable(bg[0]) - bGuestBefore[0])
+            + (escrow.guestClaimable(bg[1]) - bGuestBefore[1]);
         assertEq(toKnown, moved, "only to the booking's guest, the owner bucket and the fee recipient");
         assertEq(escrow.claimableOf(arb), 0, "the arbitrator receives nothing");
         _assertBooksBalance();

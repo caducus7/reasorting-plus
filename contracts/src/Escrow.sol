@@ -369,8 +369,13 @@ contract Escrow is
         _accrue();
         _promoteTimelocks();
         paid = LedgerLib.claim(
-            _l, usdc, _activeVault(), vaultWrittenOff ? vault : IERC4626(address(0)), msg.sender, msg.sender == payoutAddress
-        );
+            _l,
+            usdc,
+            _activeVault(),
+            vaultWrittenOff ? vault : IERC4626(address(0)),
+            msg.sender,
+            msg.sender == payoutAddress
+        ); // pulls from the vault best effort, then pays from idle (docs/adr/0016)
     }
 
     // ==========================================================================================

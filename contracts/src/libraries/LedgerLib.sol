@@ -186,24 +186,25 @@ library LedgerLib {
         if (!active) _releasePendingYield(l, account, isPayout);
         (uint256 g, uint256 requested) = _requested(l, account, isPayout, active);
         if (requested == 0) return 0;
+
+        // Pull what the vault actually pays, then pay from idle. A guest's exit never depends on
+        // the vault's views being truthful: Aave's StataTokenV2 keeps reporting maxWithdraw while
+        // its own pause makes withdraw revert (docs/adr/0016). MetaMorpho's try/catch on
+        // withdrawals during user exits is the precedent (docs/adr/0015 §2).
+        IERC4626 source = address(stranded) != address(0) ? stranded : vault;
+        if (address(source) != address(0)) _pullBestEffort(usdc, source, requested);
         if (address(stranded) != address(0)) {
-            _pullStranded(usdc, stranded, requested);
-            // Book what was pulled before paying: it narrows the shortfall or, once the loss was
-            // recognised, is a gain that repays lossDebt first (docs/adr/0013 §3, 0015 §2). Without
-            // this, a payout could exceed lastAssets.
+            // A written-off vault is outside the accounting: book what was pulled before paying.
+            // It narrows the shortfall or, once the loss was recognised, is a gain that repays
+            // lossDebt first (docs/adr/0013 §3, 0015 §2). Otherwise a payout could exceed lastAssets.
             _accrue(l, usdc, vault);
         }
+        paid = Math.min(requested, usdc.balanceOf(address(this)));
 
-        uint256 pull;
-        (pull, paid) = planPull(usdc, vault, requested);
-
-        // Effects before any external call.
         _debit(l, account, g, paid);
         l.totalClaimable -= paid;
         l.lastAssets -= paid;
         emit IEscrowEvents.Claimed(account, requested, paid);
-
-        pullFromVault(vault, pull);
         if (paid != 0) usdc.safeTransfer(account, paid);
     }
 
@@ -255,12 +256,11 @@ library LedgerLib {
         }
     }
 
-    /// @dev A written-off vault is out of the accounting but may still pay: pull what it can towards
-    /// `want`, best effort. Yearn V3 `_update_debt` measures the actual amount received, and
-    /// MetaMorpho skips a market whose withdraw reverts (try/catch) rather than failing the user's
-    /// exit. Only the escrow's own shares move, to the escrow; accounting counts the idle increase
-    /// at the next accrue (docs/adr/0015 §2). A reverting vault just yields nothing.
-    function _pullStranded(IERC20 usdc, IERC4626 v, uint256 want) private {
+    /// @dev Pull what the vault can pay towards `want`, best effort. Yearn V3 `_update_debt` measures
+    /// the actual amount received, and MetaMorpho skips a market whose withdraw reverts (try/catch)
+    /// rather than failing the user's exit. Only the escrow's own shares move, to the escrow (money
+    /// rule 3). A reverting or paused vault just yields nothing (docs/adr/0015 §2, 0016).
+    function _pullBestEffort(IERC20 usdc, IERC4626 v, uint256 want) private {
         uint256 idle = usdc.balanceOf(address(this));
         if (idle >= want) return;
         try v.maxWithdraw(address(this)) returns (uint256 mw) {

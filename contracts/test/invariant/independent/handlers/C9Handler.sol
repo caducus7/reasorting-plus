@@ -3,7 +3,14 @@ pragma solidity 0.8.35;
 
 import {Vm} from "forge-std/Vm.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IEscrow, IEscrowEvents, Quote, Cutoff, Booking, BookingState} from "../../../../src/interfaces/IEscrow.sol";
+import {
+    IEscrow,
+    IEscrowEvents,
+    Quote,
+    Cutoff,
+    Booking,
+    BookingState
+} from "../../../../src/interfaces/IEscrow.sol";
 import {C9Base, IEscrowViews, IFactoryAdmin} from "../C9Base.sol";
 
 /// @notice C9 handler. Drives the real factory + escrow through random sequences of guest, owner,
@@ -568,7 +575,9 @@ contract C9Handler is C9Base {
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 structHash = keccak256(
             abi.encode(
-                keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                keccak256(
+                    "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+                ),
                 q.guest,
                 escAddr,
                 q.priceAtomic,
@@ -576,8 +585,9 @@ contract C9Handler is C9Base {
                 deadline
             )
         );
-        (uint8 v, bytes32 r, bytes32 s) =
-            vm.sign(guestPks[gi], keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash)));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
+            guestPks[gi], keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash))
+        );
         if (frontRun) {
             // the attacker lands the guest's permit first (spec 4.2: must not grief the deposit)
             vm.prank(attacker);
@@ -631,7 +641,9 @@ contract C9Handler is C9Base {
         address caller = asAttacker ? attacker : b.guest;
         uint8 pred = MUST_OK;
         if (caller != b.guest || b.st != S_ESCROWED || _bnow(b) >= b.checkOut) pred = MUST_REVERT;
-        _settleAction(i, caller, abi.encodeCall(IEscrow.cancelByGuest, (b.id)), pred, O_CANCEL_GUEST, "cancelByGuest");
+        _settleAction(
+            i, caller, abi.encodeCall(IEscrow.cancelByGuest, (b.id)), pred, O_CANCEL_GUEST, "cancelByGuest"
+        );
     }
 
     function openDispute(uint256 idx, uint256 contestedSeed, bool asAttacker) external {
@@ -678,7 +690,9 @@ contract C9Handler is C9Base {
         b.openedAt = uint40(block.timestamp);
         b.frozenAtOpen = b.frozenTotal;
         for (uint256 k; k < logs.length; k++) {
-            if (logs[k].emitter != escAddr || logs[k].topics[0] != IEscrowEvents.DisputeOpened.selector) continue;
+            if (logs[k].emitter != escAddr || logs[k].topics[0] != IEscrowEvents.DisputeOpened.selector) {
+                continue;
+            }
             (uint256 ec,, uint256 eop, uint256 ef, uint256 ey, address er) =
                 abi.decode(logs[k].data, (uint256, bytes32, uint256, uint256, uint256, address));
             if (ec != c || eop != u - feeU || ef != feeU || ey != y || er != r) {
@@ -753,7 +767,10 @@ contract C9Handler is C9Base {
         if (paid > 0 && paid < (p.gate ? p.gOwed : p.gOwed + p.oOwed + p.fOwed)) _count("ok:partialClaim");
         if (p.relG + p.relO > 0) _count("ok:pendingYieldReleased");
         if (paid != p.expectPaid) {
-            _flag(K_CLAIM, string.concat("claim paid ", vm.toString(paid), " expected ", vm.toString(p.expectPaid)));
+            _flag(
+                K_CLAIM,
+                string.concat("claim paid ", vm.toString(paid), " expected ", vm.toString(p.expectPaid))
+            );
         }
         _applyClaim(c, p, paid);
     }
@@ -798,7 +815,12 @@ contract C9Handler is C9Base {
         uint8 pred = MUST_OK;
         if (caller != escOwner || b.st != S_ESCROWED || block.timestamp >= b.checkIn) pred = MUST_REVERT;
         _settleAction(
-            i, caller, abi.encodeCall(IEscrow.cancelByProperty, (b.id)), pred, O_CANCEL_PROPERTY, "cancelByProperty"
+            i,
+            caller,
+            abi.encodeCall(IEscrow.cancelByProperty, (b.id)),
+            pred,
+            O_CANCEL_PROPERTY,
+            "cancelByProperty"
         );
     }
 
@@ -811,9 +833,14 @@ contract C9Handler is C9Base {
         _settleAction(i, _claimant(who), abi.encodeCall(IEscrow.settle, (b.id)), pred, O_COMPLETED, "settle");
     }
 
-    function _settleAction(uint256 i, address caller, bytes memory data, uint8 pred, uint8 outcome, string memory tag)
-        internal
-    {
+    function _settleAction(
+        uint256 i,
+        address caller,
+        bytes memory data,
+        uint8 pred,
+        uint8 outcome,
+        string memory tag
+    ) internal {
         Ledger memory saved = L;
         _accrue(_assets());
         uint16 rb = outcome == O_COMPLETED ? 0 : (outcome == O_CANCEL_PROPERTY ? 10_000 : _refundBps(i));
@@ -874,14 +901,21 @@ contract C9Handler is C9Base {
         internal
     {
         for (uint256 k; k < logs.length; k++) {
-            if (logs[k].emitter != escAddr || logs[k].topics[0] != IEscrowEvents.BookingSettled.selector) continue;
+            if (logs[k].emitter != escAddr || logs[k].topics[0] != IEscrowEvents.BookingSettled.selector) {
+                continue;
+            }
             if (logs[k].topics[1] != id) continue;
             (uint8 eo, uint256 ep, Fig memory e) = abi.decode(logs[k].data, (uint8, uint256, Fig));
             if (e.refund + e.ownerPrin + e.fee != ep || e.gY + e.oY != e.y || e.fee > ep - e.refund) {
                 _flag(K_P2, "BookingSettled figures break spec 4.4 equalities");
             }
             if (eo != outcome || ep != p || !_sameFig(e, f)) {
-                _flag(K_P2, string.concat("BookingSettled figures differ from spec 4.4 ghost; outcome ", vm.toString(outcome)));
+                _flag(
+                    K_P2,
+                    string.concat(
+                        "BookingSettled figures differ from spec 4.4 ghost; outcome ", vm.toString(outcome)
+                    )
+                );
             }
             return;
         }
@@ -889,8 +923,8 @@ contract C9Handler is C9Base {
     }
 
     function _sameFig(Fig memory a, Fig memory b) internal pure returns (bool) {
-        return a.refund == b.refund && a.ownerPrin == b.ownerPrin && a.fee == b.fee && a.y == b.y && a.gY == b.gY
-            && a.oY == b.oY && a.feeRecipient == b.feeRecipient;
+        return a.refund == b.refund && a.ownerPrin == b.ownerPrin && a.fee == b.fee && a.y == b.y
+            && a.gY == b.gY && a.oY == b.oY && a.feeRecipient == b.feeRecipient;
     }
 
     // =====================================================================================
@@ -918,12 +952,19 @@ contract C9Handler is C9Base {
         GB storage b = gb[i];
         uint8 pred = MUST_OK;
         if (b.st != S_DISPUTED || block.timestamp < ghostDeadline(i)) pred = MUST_REVERT;
-        _resolveAction(i, _claimant(who), abi.encodeCall(IEscrow.resolveByDefault, (b.id)), pred, 0, "resolveByDefault");
+        _resolveAction(
+            i, _claimant(who), abi.encodeCall(IEscrow.resolveByDefault, (b.id)), pred, 0, "resolveByDefault"
+        );
     }
 
-    function _resolveAction(uint256 i, address caller, bytes memory data, uint8 pred, uint16 g, string memory tag)
-        internal
-    {
+    function _resolveAction(
+        uint256 i,
+        address caller,
+        bytes memory data,
+        uint8 pred,
+        uint16 g,
+        string memory tag
+    ) internal {
         Ledger memory saved = L;
         _accrue(_assets());
         (bool ok, bytes memory ret, Vm.Log[] memory logs) = _call(caller, data);
@@ -943,7 +984,9 @@ contract C9Handler is C9Base {
         _checkResolvedEvent(b.id, g, b.contested, f, logs);
     }
 
-    function _checkResolvedEvent(bytes32 id, uint16 g, uint256 c, Fig memory f, Vm.Log[] memory logs) internal {
+    function _checkResolvedEvent(bytes32 id, uint16 g, uint256 c, Fig memory f, Vm.Log[] memory logs)
+        internal
+    {
         for (uint256 k; k < logs.length; k++) {
             if (logs[k].emitter != escAddr || logs[k].topics[0] != IEscrowEvents.DisputeResolved.selector) continue;
             if (logs[k].topics[1] != id) continue;
@@ -1002,7 +1045,9 @@ contract C9Handler is C9Base {
         b.st = b.frozenFrom;
         uint32 onChain = esc.getBooking(b.id).frozenTotal;
         uint256 capped = total > MAX_FREEZE ? MAX_FREEZE : total;
-        if (onChain != total && onChain != capped) _flag(K_P5, "frozenTotal is neither elapsed nor capped elapsed");
+        if (onChain != total && onChain != capped) {
+            _flag(K_P5, "frozenTotal is neither elapsed nor capped elapsed");
+        }
         if (onChain != total) _flag(K_AMBIG, "frozenTotal capped at MAX_FREEZE_DURATION");
         b.frozenTotal = onChain; // documented ambiguity: the ghost adopts whichever the escrow chose
     }
@@ -1014,7 +1059,8 @@ contract C9Handler is C9Base {
         uint8 pred = (caller != guardian || pause == gPaused) ? MUST_REVERT : MUST_OK;
         uint256 laBefore = escV.lastAssets();
         uint40 sinceBefore = escV.shortfallSince();
-        bytes memory data = pause ? abi.encodeCall(IEscrow.pauseDeposits, ()) : abi.encodeCall(IEscrow.unpauseDeposits, ());
+        bytes memory data =
+            pause ? abi.encodeCall(IEscrow.pauseDeposits, ()) : abi.encodeCall(IEscrow.unpauseDeposits, ());
         (bool ok, bytes memory ret,) = _call(caller, data);
         _judge(K_AUTH, pause ? "pauseDeposits" : "unpauseDeposits", pred, ok, ret);
         if (!ok) return;
@@ -1027,10 +1073,14 @@ contract C9Handler is C9Base {
     /// Spec 6.1 / CLAUDE.md rule 4: accrue() is the first line of every state-changing function. If the
     /// model's accrue would have changed state but the escrow's baseline did not move, the function
     /// skipped accrue(): flag it under its own key and keep the ghost in step with the escrow.
-    function _detectSkippedAccrue(Ledger memory saved, uint256 laBefore, uint40 sinceBefore, string memory tag)
-        internal
-    {
-        bool modelMoved = L.lastAssets != saved.lastAssets || (saved.since == 0 && L.since != 0);
+    function _detectSkippedAccrue(
+        Ledger memory saved,
+        uint256 laBefore,
+        uint40 sinceBefore,
+        string memory tag
+    ) internal {
+        bool modelMoved =
+            L.lastAssets != saved.lastAssets || (saved.since == 0 && L.since != 0);
         bool escMoved = escV.lastAssets() != laBefore || escV.shortfallSince() != sinceBefore;
         if (modelMoved && !escMoved) {
             _flag(K_RULE4, string.concat(tag, " succeeded without running accrue()"));
@@ -1245,7 +1295,11 @@ contract C9Handler is C9Base {
         return x < cap - dep ? x : cap - dep;
     }
 
-    function _predictDeploy(address caller, uint256 amount, uint256 idle, bool gate) internal view returns (uint8) {
+    function _predictDeploy(address caller, uint256 amount, uint256 idle, bool gate)
+        internal
+        view
+        returns (uint8)
+    {
         if (caller != rebalancer || amount == 0 || amount > idle || gate) return MUST_REVERT;
         // docs/adr/0013 §1 and §5: the vault must be seeded and the owner-funded reserve floor held.
         if (vault.totalSupply() < 1e6 || L.reserve < MIN_LOSS) return MUST_REVERT;
@@ -1324,7 +1378,9 @@ contract C9Handler is C9Base {
         L.lastAssets = a;
         L.since = 0;
         for (uint256 k; k < logs.length; k++) {
-            if (logs[k].emitter != escAddr || logs[k].topics[0] != IEscrowEvents.LossRecognised.selector) continue;
+            if (logs[k].emitter != escAddr || logs[k].topics[0] != IEscrowEvents.LossRecognised.selector) {
+                continue;
+            }
             (uint256 el, uint256 er, uint256 eo, uint256 ed) =
                 abi.decode(logs[k].data, (uint256, uint256, uint256, uint256));
             if (el != total || er != fr || eo != fo + fp || ed != loss) {
@@ -1449,8 +1505,12 @@ contract C9Handler is C9Base {
         for (uint256 i; i < gb.length; i++) {
             if (gb[i].st == S_ESCROWED) this.settle(i, 8);
             else if (gb[i].st == S_DISPUTED) this.resolveByDefault(i, 8);
-            if (gb[i].st != S_SETTLED) _flag(K_P11, string.concat("booking not settleable: ", vm.toString(i)));
-            if (uint8(esc.bookingState(gb[i].id)) != S_SETTLED) _flag(K_P11, "bookingState != SETTLED after drain");
+            if (gb[i].st != S_SETTLED) {
+                _flag(K_P11, string.concat("booking not settleable: ", vm.toString(i)));
+            }
+            if (uint8(esc.bookingState(gb[i].id)) != S_SETTLED) {
+                _flag(K_P11, "bookingState != SETTLED after drain");
+            }
         }
         _drainLoss();
         for (uint256 i; i < 4; i++) {

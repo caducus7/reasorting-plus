@@ -78,7 +78,9 @@ contract VaultSafetyTest is YieldTestBase {
     /// With the seed and offset in place a donation costs the escrow at most deposit rounding, about
     /// two shares' worth, while the attacker's USDC is captured by the seed and virtual shares: the
     /// attack is possible but uneconomic by a factor of ~1e11 (OpenZeppelin ERC4626 CAUTION).
-    function testFuzz_F2_donationIntoSeededVaultCostsTheEscrowNothing(uint256 donation, uint256 amount) public {
+    function testFuzz_F2_donationIntoSeededVaultCostsTheEscrowNothing(uint256 donation, uint256 amount)
+        public
+    {
         donation = bound(donation, 1, 10_000_000 * USDC);
         _deposit(_q(guest, P));
         amount = bound(amount, 1 * USDC, P * 9 / 10);

@@ -181,10 +181,11 @@ contract ClaimTest is EscrowTestBase {
         vm.prank(guest);
         escrow.cancelByGuest(id);
 
-        vm.expectEmit(address(escrow));
-        emit Claimed(guest, P, 1_600 * USDC); // effects (and their event) precede the vault call
+        // The pull comes first and is measured; the payout is what idle then holds (docs/adr/0016).
         vm.expectEmit(address(escrow));
         emit Redeemed(1_000 * USDC);
+        vm.expectEmit(address(escrow));
+        emit Claimed(guest, P, 1_600 * USDC);
         assertEq(_claim(guest), 1_600 * USDC);
         assertEq(escrow.guestClaimable(guest), 4_000 * USDC, "crediting never reverts; rest stays claimable");
 

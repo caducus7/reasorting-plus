@@ -81,7 +81,9 @@ contract Review0004FixesTest is YieldTestBase {
         vm.recordLogs();
         escrow.settle(id);
         assertTrue(_emitted(IEscrowEvents.YieldDeferred.selector), "yield deferred while a loss is active");
-        assertEq(escrow.claimableOf(guest), 0, "guest yield is not claimable ahead of other guests' principal");
+        assertEq(
+            escrow.claimableOf(guest), 0, "guest yield is not claimable ahead of other guests' principal"
+        );
         assertGt(escrow.pendingYieldOf(guest), 0);
 
         _gain(20 * USDC); // the vault recovers: the shortfall clears

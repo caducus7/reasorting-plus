@@ -317,7 +317,8 @@ fee <= retained
 function claim() external;   // pays min(claimable[msg.sender], liquid available)
 ```
 
-- `claim` redeems from the adapter when idle funds are short, bounded by `maxWithdrawable()`.
+- `claim` redeems from the vault when idle funds are short, bounded by `maxWithdraw(escrow)`, best
+  effort: a failing vault call pays from idle funds and never reverts the claim (ADR 0016).
 - If the adapter cannot supply the full amount, it pays what it can and leaves the rest
   claimable. **Crediting never reverts.** Only the transfer can be partial.
 - While `lossDebt > 0` **or a shortfall is observed** (ADR 0009), only guest credits are paid. A
@@ -533,10 +534,11 @@ outstanding. Approve only rate-priced vaults (Aave StataTokenV2) or OpenZeppelin
   to `0xdEaD` at deploy): settable rate and withdrawal limit. Testnet and all
   demos run on this: months of accrual in minutes, and a liquidity crunch on demand. Aave testnet
   rates are meaningless; do not demo on them.
-- **Aave:** tested only on a Base mainnet fork. Prototype Aave's own ERC-4626 wrapper
-  (`AaveV3Base.USDC_STATA_TOKEN`) and a thin ERC-4626 adapter over the raw pool on the fork, and
-  record the choice in an ADR (D5). It must expose the
-  market's available liquidity for the rebalancer (a view, off the interface).
+- **Aave:** Aave's own ERC-4626 wrapper, StataTokenV2 (`AaveV3Base.USDC_STATA_TOKEN`), used directly
+  with no adapter of ours (ADR 0016, D5). Tested only on a pinned Base mainnet fork. The market's
+  available liquidity for the rebalancer is Aave's view `Pool.getVirtualUnderlyingBalance(USDC)`.
+  The wrapper's pause leaves `maxWithdraw` non-zero while `withdraw` reverts (an EIP-4626
+  deviation), so `claim` pulls best effort and never relies on `maxWithdraw` succeeding (4.5).
 
 ### 6.7 Rebalancer policy (work package C8)
 
@@ -800,7 +802,7 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | D2 | Fee on the owner's yield share | No | Decided |
 | D3 | Guest yield share on owner cancellation and guest-won disputes | To owner | Decided |
 | D4 | Mandatory owner reserve for third-party owners | Not for the pilot; required before a second owner | Second owner |
-| D5 | Aave raw pool or vault wrapper | ADR on fork evidence | C4 |
+| D5 | Aave raw pool or vault wrapper | StataTokenV2, no adapter of ours ([ADR 0016](adr/0016-aave-integration.md)) | Decided |
 | D6 | Indexing framework | Ponder, plus a head tracker and deep-reorg replay ([ADR 0014](adr/0014-indexing-framework.md)) | Decided |
 | D7 | Who issues guest auth tokens | Checkout backend (agent workstream A3) | C5 read endpoints |
 | D8 | Owner-opened disputes: add a damage deposit, or guest-only | Guest only | C3 |
@@ -859,4 +861,5 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | [0014](adr/0014-indexing-framework.md) | 10.1, 14 (D6): Ponder; head tracker for real `safe`/`finalized` tags; deep-reorg halt triggers a full replay |
 | [0015](adr/0015-review-0004-fixes.md) | 3.5, 6.4 to 6.6: a freeze stops the booking's clock; a written-off vault still pays out (best effort, booked before paying); freeze needs no vault read; yield deferred during an observed shortfall |
 | [0013](adr/0013-vault-safety-c9-findings.md) | 6.1, 6.3 to 6.6, 10.4: seeded vaults only, pause is a pure flag, privileged vault write-off/recovery, INV-1 band, owner-funded reserve floor |
+| [0016](adr/0016-aave-integration.md) | 4.5, 6.6, 14 (D5): Aave via StataTokenV2; claim pulls from the vault best effort |
 | [0012](adr/0012-quote-service-policies.md) | 5.1 to 5.3: DST materialisation rules, holds and one live quote per offer, 900 s feed staleness, fee-straddle cap, 409 on offers (docs only), guest JWT claims (agent-workstream sign-off pending), shared calendar tables |

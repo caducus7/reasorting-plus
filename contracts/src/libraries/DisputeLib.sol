@@ -76,7 +76,8 @@ library DisputeLib {
         l.feeClaimable[feeTo] += f.fee;
         l.totalClaimable += contested;
 
-        if (!LedgerLib.lossActive(l)) { // docs/adr/0015 §4
+        if (!LedgerLib.lossActive(l)) {
+            // docs/adr/0015 §4
             l.totalPendingYield -= y;
             l.guestClaimable[guest] += f.guestYield;
             l.ownerClaimable += f.ownerYield;

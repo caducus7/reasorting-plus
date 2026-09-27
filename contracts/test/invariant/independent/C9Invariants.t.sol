@@ -105,7 +105,9 @@ contract C9IndependentInvariants is StdInvariant, Test {
         uint256 liab = v.totalOpenPrincipal() + v.totalDisputed() + v.totalPendingYield() + v.totalClaimable();
         uint256 la = v.lastAssets();
         uint256 sf = la > a ? la - a : 0;
-        assertGe(a + v.lossDebt() + sf, liab + v.reserve() + v.yieldUnallocated(), "INV-2 (loss-adjusted) broken");
+        assertGe(
+            a + v.lossDebt() + sf, liab + v.reserve() + v.yieldUnallocated(), "INV-2 (loss-adjusted) broken"
+        );
     }
 
     /// ADR 0010 section 2 books identity, on the contract's own getters.
@@ -186,7 +188,9 @@ contract C9IndependentInvariants is StdInvariant, Test {
     // ------------------------------------------------------------------ property 6 (spec 3.3, rule 3)
 
     function invariant_P6_onlyEntitledRecipients_spec3_3() public view {
-        assertEq(usdc.badEscrowOut(), 0, "escrow paid an address that is not guest/payout/fee recipient/vault");
+        assertEq(
+            usdc.badEscrowOut(), 0, "escrow paid an address that is not guest/payout/fee recipient/vault"
+        );
         assertEq(usdc.badVaultIn(), 0, "vault received USDC from someone other than the escrow");
         assertEq(usdc.badVaultOut(), 0, "vault paid someone other than the escrow");
         (address p1, address p2,,, address reb, address att) = h.roles();

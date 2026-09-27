@@ -36,7 +36,9 @@ contract Review0004Test is YieldTestBase {
 
         // Expected: the refund the guest was entitled to when the guardian froze the booking.
         // Actual: 0, because the policy clock ran through every cutoff while the booking was frozen.
-        assertEq(escrow.guestClaimable(guest), q.priceAtomic, "R1: freeze moved the guest's refund to the owner");
+        assertEq(
+            escrow.guestClaimable(guest), q.priceAtomic, "R1: freeze moved the guest's refund to the owner"
+        );
     }
 
     /// Same mechanism at the other end of the stay (already raised as a spec concern in the C3
@@ -57,7 +59,9 @@ contract Review0004Test is YieldTestBase {
         // Actual: reverts DisputeTooLate.
         vm.prank(guest);
         escrow.openDispute(id, q.priceAtomic, keccak256("evidence"));
-        assertEq(uint8(escrow.bookingState(id)), uint8(BookingState.DISPUTED), "R1: dispute right lost to freeze");
+        assertEq(
+            uint8(escrow.bookingState(id)), uint8(BookingState.DISPUTED), "R1: dispute right lost to freeze"
+        );
     }
 
     // ------------------------------------------------------------------------------------------

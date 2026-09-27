@@ -2,7 +2,14 @@
 pragma solidity 0.8.35;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IEscrow, IEscrowErrors, Quote, Cutoff, Booking, BookingState} from "../../../src/interfaces/IEscrow.sol";
+import {
+    IEscrow,
+    IEscrowErrors,
+    Quote,
+    Cutoff,
+    Booking,
+    BookingState
+} from "../../../src/interfaces/IEscrow.sol";
 import {IEscrowFactory} from "../../../src/interfaces/IEscrowFactory.sol";
 import {C9Base, IEscrowViews, IFactoryAdmin} from "./C9Base.sol";
 import {C9Usdc} from "./mocks/C9Usdc.sol";
@@ -68,7 +75,11 @@ contract C9Adversarial is C9Base {
     }
 
     /// Spec 4.4 figures for a principal, refund bps and fee.
-    function _fig(uint256 p, uint256 rb, uint256 feeBps) internal pure returns (uint256 refund, uint256 fee, uint256 own) {
+    function _fig(uint256 p, uint256 rb, uint256 feeBps)
+        internal
+        pure
+        returns (uint256 refund, uint256 fee, uint256 own)
+    {
         refund = Math.ceilDiv(p * rb, 10_000);
         fee = (p - refund) * feeBps / 10_000;
         own = p - refund - fee;
@@ -162,7 +173,9 @@ contract C9Adversarial is C9Base {
         esc.deposit(q, sig);
         vm.stopPrank();
         // guard 1: wrong signer
-        _expectDepositRevert(q, _signQuote(attackerPk, escAddr, q), IEscrowErrors.InvalidQuoteSignature.selector);
+        _expectDepositRevert(
+            q, _signQuote(attackerPk, escAddr, q), IEscrowErrors.InvalidQuoteSignature.selector
+        );
         // guard 3: expired
         vm.warp(uint256(q.expiresAt) + 1);
         _expectDepositRevert(q, sig, IEscrowErrors.QuoteExpired.selector);
@@ -353,15 +366,25 @@ contract C9Adversarial is C9Base {
         (,, uint256 own) = _fig(3_000e6, 0, ESCROW_FEE);
         assertEq(escV.feeClaimable(feeR1), 0);
         assertGt(escV.feeClaimable(feeR2), 0);
-        assertEq(escV.feeClaimable(feeR2), (3_000e6 - own) + (2_000e6 * uint256(ESCROW_FEE) / 10_000), "fees to live recipient");
+        assertEq(
+            escV.feeClaimable(feeR2),
+            (3_000e6 - own) + (2_000e6 * uint256(ESCROW_FEE) / 10_000),
+            "fees to live recipient"
+        );
     }
 
     // ------------------------------------------------------------------ permit front-running (spec 4.2)
 
-    function _permitSig(uint256 gi, uint256 value, uint256 deadline) internal view returns (uint8, bytes32, bytes32) {
+    function _permitSig(uint256 gi, uint256 value, uint256 deadline)
+        internal
+        view
+        returns (uint8, bytes32, bytes32)
+    {
         bytes32 sh = keccak256(
             abi.encode(
-                keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                keccak256(
+                    "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+                ),
                 guests[gi],
                 escAddr,
                 value,
@@ -555,7 +578,9 @@ contract C9Adversarial is C9Base {
         vm.warp(s.t + LOSS_WINDOW);
         vm.expectRevert(IEscrowErrors.NoLossToRecognise.selector);
         esc.recogniseLoss();
-        assertLe(escV.accYieldPerUnit() - accBefore, 1e18 * 3 / uint256(10_000e6), "recovery paid out as yield");
+        assertLe(
+            escV.accYieldPerUnit() - accBefore, 1e18 * 3 / uint256(10_000e6), "recovery paid out as yield"
+        );
     }
 
     function test_subThresholdLoss_neverRecognised_ADR0010() public {

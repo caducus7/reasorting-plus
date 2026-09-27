@@ -44,8 +44,12 @@ interface IEscrowViews {
 
 /// @notice Factory functions on the published ABI (contracts/abi/EscrowFactory.json) beyond IEscrowFactory.
 interface IFactoryAdmin {
-    function approveOwner(address escrowOwner, uint16 maxFeeBps, uint16 feeBps, uint256 maxOpenPrincipalAtomic)
-        external;
+    function approveOwner(
+        address escrowOwner,
+        uint16 maxFeeBps,
+        uint16 feeBps,
+        uint256 maxOpenPrincipalAtomic
+    ) external;
     function proposeFeeRecipient(address newFeeRecipient) external;
     function feeRecipient() external view returns (address);
     function createEscrow(address payoutAddress, address quoteSigner, uint256 minNightlyAtomic)
@@ -130,7 +134,8 @@ abstract contract C9Base is Test {
         vault = new C9Vault(usdc);
         _seedVault(); // before the factory accepts the vault (docs/adr/0013 §1)
         impl = new Escrow();
-        factory = new EscrowFactory(admin, address(usdc), address(impl), feeR1, guardian, arbA1, address(vault));
+        factory =
+            new EscrowFactory(admin, address(usdc), address(impl), feeR1, guardian, arbA1, address(vault));
 
         vm.prank(admin);
         IFactoryAdmin(address(factory)).approveOwner(escOwner, ESCROW_MAX_FEE, ESCROW_FEE, CAP);
@@ -179,11 +184,16 @@ abstract contract C9Base is Test {
     /// @dev Spec 4.1: bookingId = EIP-712 hashStruct(quote), computed here from the struct definition.
     function _hashStruct(Quote memory q) internal pure returns (bytes32) {
         bytes memory a = abi.encode(
-            QUOTE_TYPEHASH, q.resourceId, q.checkInUtc, q.checkOutUtc, q.priceAtomic, q.feeBps, q.guestYieldBps
+            QUOTE_TYPEHASH,
+            q.resourceId,
+            q.checkInUtc,
+            q.checkOutUtc,
+            q.priceAtomic,
+            q.feeBps,
+            q.guestYieldBps
         );
-        bytes memory b = abi.encode(
-            q.policyHash, _hashCutoffs(q.cutoffs), q.finalBps, q.guest, q.expiresAt, q.salt
-        );
+        bytes memory b =
+            abi.encode(q.policyHash, _hashCutoffs(q.cutoffs), q.finalBps, q.guest, q.expiresAt, q.salt);
         return keccak256(bytes.concat(a, b));
     }
 
@@ -191,7 +201,9 @@ abstract contract C9Base is Test {
         (, string memory name, string memory version,,,,) = IEscrowViews(escrow).eip712Domain();
         return keccak256(
             abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(
+                    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+                ),
                 keccak256(bytes(name)),
                 keccak256(bytes(version)),
                 block.chainid,
