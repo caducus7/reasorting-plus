@@ -1,0 +1,22 @@
+{
+  "name": "@chain/indexer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsc -p tsconfig.json && vitest run",
+    "test:anvil": "vitest run --dir test/anvil"
+  },
+  "dependencies": {
+    "@chain/abi": "workspace:*",
+    "@chain/shared": "workspace:*",
+    "ponder": "0.17.12",
+    "viem": "^2.56.9",
+    "hono": "^4.13.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

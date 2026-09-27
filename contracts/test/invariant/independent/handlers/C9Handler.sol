@@ -369,6 +369,7 @@ contract C9Handler is C9Base {
     /// Calls the escrow as `caller`, recording logs; folds YieldAccrued gains into `evGain`.
     function _call(address caller, bytes memory data)
         internal
+        virtual
         returns (bool ok, bytes memory ret, Vm.Log[] memory logs)
     {
         vm.recordLogs();
