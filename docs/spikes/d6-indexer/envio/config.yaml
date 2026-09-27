@@ -1,0 +1,20 @@
+name: envio_proto
+rollback_on_reorg: true
+field_selection:
+  transaction_fields:
+    - "hash"
+contracts:
+  - name: Escrow
+    abi_file_path: abis/Escrow.json
+    events:
+      - event: BookingDeposited
+chains:
+  - id: 31337
+    max_reorg_depth: 50
+    rpc:
+      url: "${ENVIO_RPC_URL}"
+      for: sync
+    start_block: 0
+    contracts:
+      - name: Escrow
+        address: "${ENVIO_ESCROW}"

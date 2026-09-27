@@ -1,0 +1,7 @@
+type Booking {
+  id: ID!
+  guest: String!
+  principal: BigInt!
+  blockNumber: Int!
+  eventKey: String!
+}

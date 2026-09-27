@@ -799,7 +799,7 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | D3 | Guest yield share on owner cancellation and guest-won disputes | To owner | Decided |
 | D4 | Mandatory owner reserve for third-party owners | Not for the pilot; required before a second owner | Second owner |
 | D5 | Aave raw pool or vault wrapper | ADR on fork evidence | C4 |
-| D6 | Indexing framework | ADR against section 10.1 | C6 |
+| D6 | Indexing framework | Ponder, plus a head tracker and deep-reorg replay ([ADR 0014](adr/0014-indexing-framework.md)) | Decided |
 | D7 | Who issues guest auth tokens | Checkout backend (agent workstream A3) | C5 read endpoints |
 | D8 | Owner-opened disputes: add a damage deposit, or guest-only | Guest only | C3 |
 | D9 | Arbitrator rotation for existing bookings if the Safe is compromised | None; snapshot is final | C1 |
@@ -854,5 +854,6 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | [0010](adr/0010-c2-accounting-structure.md) | 6.1 to 6.5: Ledger struct and linked libraries, pending-yield release, 1 USDC loss threshold, owner deferred yield absorbs losses |
 | [0011](adr/0011-disputes.md) | 7: reason enum, frozen time extends the dispute deadline, `DisputeOpened` figures |
 | [0009](adr/0009-loss-window-and-remaining-defaults.md) | 6.1, 6.4, 6.5, 4.5: high-water-mark baseline, shortfall gating, reserve recipient; bookingId keying off-chain |
+| [0014](adr/0014-indexing-framework.md) | 10.1, 14 (D6): Ponder; head tracker for real `safe`/`finalized` tags; deep-reorg halt triggers a full replay |
 | [0013](adr/0013-vault-safety-c9-findings.md) | 6.1, 6.3 to 6.6, 10.4: seeded vaults only, pause is a pure flag, privileged vault write-off/recovery, INV-1 band, owner-funded reserve floor |
 | [0012](adr/0012-quote-service-policies.md) | 5.1 to 5.3: DST materialisation rules, holds and one live quote per offer, 900 s feed staleness, fee-straddle cap, 409 on offers (docs only), guest JWT claims (agent-workstream sign-off pending), shared calendar tables |

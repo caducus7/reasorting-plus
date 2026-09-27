@@ -1,0 +1,4 @@
+{ "name": "ponder-proto", "private": true, "type": "module",
+  "scripts": { "start": "ponder start" },
+  "dependencies": { "ponder": "0.17.12", "viem": "^2.56.9", "hono": "^4.13.9" },
+  "devDependencies": { "typescript": "~5.9.3", "@types/node": "^22.20.4" } }

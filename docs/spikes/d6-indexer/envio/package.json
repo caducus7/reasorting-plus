@@ -1,0 +1,5 @@
+{ "name": "envio-proto", "version": "0.1.0", "private": true, "type": "module",
+  "scripts": { "codegen": "envio codegen", "start": "envio start" },
+  "dependencies": { "envio": "3.12.1" },
+  "devDependencies": { "typescript": "~5.9.3", "@types/node": "^22.20.4" },
+  "engines": { "node": ">=22.0.0" } }
