@@ -410,6 +410,7 @@ async function preparedBooking(): Promise<{ bookingId: Hex; quote: v1.Quote }> {
     guestYieldBps: q.guestYieldBps,
     finalBps: q.finalBps,
     cutoffs: q.cutoffs,
+    frozenTotal: 0,
     accruedGuestYieldAtomic: 1_234n,
     claimableAtomic: 0n,
     txHash: `0x${"aa".repeat(32)}`,
@@ -463,6 +464,15 @@ describe("bookings (guest auth)", () => {
     clock = quote.checkOutUtc * 1000;
     const late = await post(`/v1/bookings/${bookingId}/cancel-preview`, {}, h);
     expect([late.status, await late.json()]).toEqual([409, { error: "not_cancellable" }]);
+  });
+
+  it("previews on the booking's clock after a freeze (frozen time does not count, ADR 0015 §1)", async () => {
+    const { bookingId, quote } = await preparedBooking();
+    const h = { authorization: `Bearer ${await jwt({ addr: GUEST })}` };
+    clock = (quote.cutoffs[1]!.cutoffUtc + 5 * 86_400) * 1000; // real time: past the 50% cutoff
+    bookings.get(bookingId.toLowerCase())!.frozenTotal = 6 * 86_400; // but frozen for 6 days
+    const r = v1.CancelPreviewResponse.parse(await (await post(`/v1/bookings/${bookingId}/cancel-preview`, {}, h)).json());
+    expect(r.refundBps).toBe(5_000);
   });
 
   it("cancel-preview 409s a settled booking and GET exposes claim calls when funds are claimable", async () => {

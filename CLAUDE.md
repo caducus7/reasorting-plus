@@ -117,6 +117,8 @@ without checking.
 | No upgrade path | Immutable clones; migration by draining | 2 |
 | Pause does not run `accrue()` | A broken vault must never stop the guardian pausing; Aave's pause does not sync indexes either | 6.1, ADR 0013 |
 | `deploy` needs a seeded vault and a 1 USDC owner reserve | Inflation-attack defence and first-loss dust buffer, per audited vault practice | 6.3, ADR 0013 |
+| Guest time checks and `settle` use `now − frozenTotal`, but `cancelByProperty` uses real time | A freeze must not run out the guest's rights; the owner must not evict mid-stay | 3.5, ADR 0015 |
+| A written-off vault is still withdrawn from (try/catch) in `claim` and `redeem` | A write-off excludes the vault from valuation, not from exit liquidity (Yearn's "remove all possible assets first") | 6.4, ADR 0015 |
 | `openDispute` is guest-only | Owners have nothing to claim without a damage deposit (D8) | 7 |
 
 If you believe one of these is actually wrong, write it up in your handoff under "Spec concerns".

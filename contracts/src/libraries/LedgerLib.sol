@@ -53,6 +53,10 @@ library LedgerLib {
     /// @notice Gains above `lastAssets` repay lossDebt, then go to the accumulator (or the reserve
     /// when no principal is open). A dip never lowers `lastAssets`: it is an observed shortfall.
     function accrue(Ledger storage l, IERC20 usdc, IERC4626 vault) external {
+        _accrue(l, usdc, vault);
+    }
+
+    function _accrue(Ledger storage l, IERC20 usdc, IERC4626 vault) private {
         uint256 assets = totalAssets(usdc, vault);
         uint256 booked = l.lastAssets;
         if (assets > booked) {
@@ -124,7 +128,9 @@ library LedgerLib {
         l.totalOpenPrincipal -= principal;
         l.feeClaimable[feeTo] += f.fee;
         address guest = b.guest;
-        if (l.lossDebt == 0) {
+        // Yield is credited only while no loss is active (lossDebt or an observed shortfall), so it can
+        // never be paid ahead of guest principal during a loss (ADR 0009 guests-first; docs/adr/0015 §4).
+        if (!lossActive(l)) {
             l.guestClaimable[guest] += f.refund + f.guestYield;
             l.ownerClaimable += f.ownerPrincipal + f.ownerYield;
             l.totalClaimable += principal + y;
@@ -168,14 +174,25 @@ library LedgerLib {
     /// @notice Pays `account` min(claimable, liquid), guest bucket first. Zero claimable is a
     /// no-op. While a loss is active only the guest bucket is paid, and a caller holding only owner
     /// or fee credits reverts. Deferred yield is released first when no loss is active.
-    function claim(Ledger storage l, IERC20 usdc, IERC4626 vault, address account, bool isPayout)
-        external
-        returns (uint256 paid)
-    {
+    function claim(
+        Ledger storage l,
+        IERC20 usdc,
+        IERC4626 vault,
+        IERC4626 stranded,
+        address account,
+        bool isPayout
+    ) external returns (uint256 paid) {
         bool active = lossActive(l);
         if (!active) _releasePendingYield(l, account, isPayout);
         (uint256 g, uint256 requested) = _requested(l, account, isPayout, active);
         if (requested == 0) return 0;
+        if (address(stranded) != address(0)) {
+            _pullStranded(usdc, stranded, requested);
+            // Book what was pulled before paying: it narrows the shortfall or, once the loss was
+            // recognised, is a gain that repays lossDebt first (docs/adr/0013 §3, 0015 §2). Without
+            // this, a payout could exceed lastAssets.
+            _accrue(l, usdc, vault);
+        }
 
         uint256 pull;
         (pull, paid) = planPull(usdc, vault, requested);
@@ -236,6 +253,23 @@ library LedgerLib {
             l.totalClaimable += amount;
             emit IEscrowEvents.PendingYieldReleased(account, amount);
         }
+    }
+
+    /// @dev A written-off vault is out of the accounting but may still pay: pull what it can towards
+    /// `want`, best effort. Yearn V3 `_update_debt` measures the actual amount received, and
+    /// MetaMorpho skips a market whose withdraw reverts (try/catch) rather than failing the user's
+    /// exit. Only the escrow's own shares move, to the escrow; accounting counts the idle increase
+    /// at the next accrue (docs/adr/0015 §2). A reverting vault just yields nothing.
+    function _pullStranded(IERC20 usdc, IERC4626 v, uint256 want) private {
+        uint256 idle = usdc.balanceOf(address(this));
+        if (idle >= want) return;
+        try v.maxWithdraw(address(this)) returns (uint256 mw) {
+            uint256 pull = Math.min(want - idle, mw);
+            if (pull == 0) return;
+            try v.withdraw(pull, address(this), address(this)) {
+                emit IEscrowEvents.Redeemed(usdc.balanceOf(address(this)) - idle);
+            } catch {}
+        } catch {}
     }
 
     /// @notice How much to pull from the vault to pay `amount`, and how much can be paid. Views only.

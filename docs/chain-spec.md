@@ -169,8 +169,9 @@ ESCROWED ──cancelByGuest (now < checkOut)───────────�
   The guardian may freeze an `ESCROWED` or `DISPUTED` booking; unfreeze restores the frozen-from
   state. Each booking has a cumulative 30-day freeze budget, after which anyone may unfreeze and it
   cannot be frozen again (ADR 0007).
-  It never moves funds. Time spent frozen does not extend `GRACE`; unfreeze restores `ESCROWED`
-  and the booking follows the clock from there.
+  It never moves funds. **A freeze stops the booking's clock** (ADR 0015 §1). Cancellation tiers,
+  delivery, the dispute window and settlement all run on `now − frozenTotal`, so the guest keeps the
+  time they were locked out of. `cancelByProperty` keeps real time.
 - `cancelByGuest` is allowed until `checkOut`. Before `checkIn` the refund comes from the cutoffs;
   from `checkIn` onward (no-show or early departure) it is `finalBps`.
 - `cancelByProperty` refunds 100% of principal regardless of policy.
@@ -490,7 +491,8 @@ While `lossDebt > 0`:
 - owner payout and fee recipient claims revert (also while a shortfall is observed, ADR 0009)
 - `deploy` reverts; the rebalancer may only redeem
 - gains repay `lossDebt` before any distribution
-- yield credits on settlement are deferred into `totalPendingYield`
+- yield credits on settlement are deferred into `totalPendingYield`, also while a shortfall is
+  observed (ADR 0015 §4)
 - bookings still settle and guest principal claims proceed, first from idle, then from the adapter
 - the owner clears the debt with `topUpLoss(amount)`
 
@@ -855,5 +857,6 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | [0011](adr/0011-disputes.md) | 7: reason enum, frozen time extends the dispute deadline, `DisputeOpened` figures |
 | [0009](adr/0009-loss-window-and-remaining-defaults.md) | 6.1, 6.4, 6.5, 4.5: high-water-mark baseline, shortfall gating, reserve recipient; bookingId keying off-chain |
 | [0014](adr/0014-indexing-framework.md) | 10.1, 14 (D6): Ponder; head tracker for real `safe`/`finalized` tags; deep-reorg halt triggers a full replay |
+| [0015](adr/0015-review-0004-fixes.md) | 3.5, 6.4 to 6.6: a freeze stops the booking's clock; a written-off vault still pays out (best effort, booked before paying); freeze needs no vault read; yield deferred during an observed shortfall |
 | [0013](adr/0013-vault-safety-c9-findings.md) | 6.1, 6.3 to 6.6, 10.4: seeded vaults only, pause is a pure flag, privileged vault write-off/recovery, INV-1 band, owner-funded reserve floor |
 | [0012](adr/0012-quote-service-policies.md) | 5.1 to 5.3: DST materialisation rules, holds and one live quote per offer, 900 s feed staleness, fee-straddle cap, 409 on offers (docs only), guest JWT claims (agent-workstream sign-off pending), shared calendar tables |

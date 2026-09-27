@@ -211,13 +211,20 @@ contract LifecycleTest is EscrowTestBase {
         escrow.settle(id);
     }
 
+    /// Amended by docs/adr/0015 §1: frozen time stops the booking's clock (capped by the 30-day
+    /// budget), so the guest keeps the time they were locked out of.
     function test_unfreeze_restoresClockDerivedState() public {
         _freeze();
         vm.warp(uint256(q.checkOutUtc) + 72 hours); // frozen across check-out and GRACE
         vm.prank(guardian);
         escrow.unfreezeBooking(id);
+        assertEq(uint8(_state()), uint8(BookingState.ESCROWED), "booking clock is 30 days behind");
+        vm.expectRevert(SettleTooEarly.selector);
+        escrow.settle(id);
+        vm.warp(uint256(q.checkOutUtc) + 30 days);
         assertEq(uint8(_state()), uint8(BookingState.DELIVERED));
-        escrow.settle(id); // GRACE was not extended by the freeze
+        vm.warp(uint256(q.checkOutUtc) + 72 hours + 30 days);
+        escrow.settle(id);
     }
 
     function test_freeze_onlyGuardian() public {

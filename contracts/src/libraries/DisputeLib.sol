@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IEscrowEvents, Booking, BookingState, Dispute} from "../interfaces/IEscrow.sol";
-import {Ledger} from "./LedgerLib.sol";
+import {Ledger, LedgerLib} from "./LedgerLib.sol";
 import {SettlementLib} from "./SettlementLib.sol";
 import {Params} from "./Params.sol";
 
@@ -76,7 +76,7 @@ library DisputeLib {
         l.feeClaimable[feeTo] += f.fee;
         l.totalClaimable += contested;
 
-        if (l.lossDebt == 0) {
+        if (!LedgerLib.lossActive(l)) { // docs/adr/0015 §4
             l.totalPendingYield -= y;
             l.guestClaimable[guest] += f.guestYield;
             l.ownerClaimable += f.ownerYield;

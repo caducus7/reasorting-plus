@@ -685,8 +685,13 @@ contract C9Adversarial is C9Base {
         vm.prank(guardian);
         vm.expectRevert(IEscrowErrors.FreezeBudgetExhausted.selector);
         esc.freezeBooking(id);
+        // Amended by docs/adr/0015 §1: the freeze stopped the booking's clock for MAX_FREEZE, so
+        // GRACE (and settlement) move by the same amount.
         vm.warp(uint256(q.checkOutUtc) + GRACE);
-        esc.settle(id); // GRACE was not extended by the freeze
+        vm.expectRevert(IEscrowErrors.SettleTooEarly.selector);
+        esc.settle(id);
+        vm.warp(uint256(q.checkOutUtc) + GRACE + MAX_FREEZE);
+        esc.settle(id);
     }
 
     // ------------------------------------------------------------------ yield attribution (spec 6.1)

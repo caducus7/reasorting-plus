@@ -279,7 +279,7 @@ contract VaultSafetyTest is YieldTestBase {
         vm.expectRevert(IEscrowErrors.VaultIsWrittenOff.selector);
         escrow.deploy(1);
         vm.prank(rebalancer);
-        vm.expectRevert(IEscrowErrors.VaultIsWrittenOff.selector);
+        vm.expectRevert(MockVault.VaultBroken.selector); // redeem stays allowed (ADR 0015 §2); this vault is broken
         escrow.redeem(1);
         vm.prank(attacker);
         vm.expectRevert(IEscrowErrors.NotOwnerOrGuardian.selector);

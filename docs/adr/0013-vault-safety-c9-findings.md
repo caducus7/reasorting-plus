@@ -78,7 +78,9 @@ valuation read is wrapped in try/catch; no audited vault does that.
 - Owner and fee claims are gated.
 - After `LOSS_CONFIRMATION_WINDOW` anyone can recognise the loss. It is absorbed by the reserve,
   then the owner, then `lossDebt`.
-- `deploy` and `redeem` revert with `VaultIsWrittenOff`.
+- `deploy` reverts with `VaultIsWrittenOff`. *(Amended by ADR 0015 §2: `redeem` stays allowed, and
+  `claim` still pulls what the written-off vault can pay, so a write-off never withholds guest
+  refunds.)*
 
 **Exception to rule 4.** `writeOffVault` and `recoverVault` set their flag before `accrue()`, because
 `accrue()` cannot read a broken vault.

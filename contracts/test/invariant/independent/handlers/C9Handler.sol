@@ -263,7 +263,7 @@ contract C9Handler is C9Base {
     function ghostState(uint256 i) external view returns (bytes32 id, uint8 st) {
         GB storage b = gb[i];
         st = b.st;
-        if (st == S_ESCROWED && block.timestamp >= b.checkOut) st = S_DELIVERED;
+        if (st == S_ESCROWED && _bnow(b) >= b.checkOut) st = S_DELIVERED;
         return (b.id, st);
     }
 
@@ -278,7 +278,7 @@ contract C9Handler is C9Base {
 
     function ghostRefundBps(uint256 i) external view returns (bool live, uint16 bps) {
         GB storage b = gb[i];
-        if (b.st != S_ESCROWED || block.timestamp >= b.checkOut) return (false, 0);
+        if (b.st != S_ESCROWED || _bnow(b) >= b.checkOut) return (false, 0);
         return (true, _refundBps(i));
     }
 
@@ -320,12 +320,19 @@ contract C9Handler is C9Base {
         return L.lossDebt > 0 || (L.lastAssets > a && L.lastAssets - a >= MIN_LOSS);
     }
 
+    /// Amended spec (docs/adr/0015 §1): guest-facing and settle checks run on the booking's clock,
+    /// real time minus the time it spent frozen. cancelByProperty keeps real time.
+    function _bnow(GB storage b) internal view returns (uint256) {
+        return block.timestamp - b.frozenTotal;
+    }
+
     function _refundBps(uint256 i) internal view returns (uint16) {
         GB storage b = gb[i];
-        if (block.timestamp >= b.checkIn) return b.finalBps;
+        uint256 t = _bnow(b);
+        if (t >= b.checkIn) return b.finalBps;
         Cutoff[] storage cs = gCut[i];
         for (uint256 j; j < cs.length; j++) {
-            if (block.timestamp < cs[j].cutoffUtc) return cs[j].refundBps;
+            if (t < cs[j].cutoffUtc) return cs[j].refundBps;
         }
         return b.finalBps;
     }
@@ -623,7 +630,7 @@ contract C9Handler is C9Base {
         GB storage b = gb[i];
         address caller = asAttacker ? attacker : b.guest;
         uint8 pred = MUST_OK;
-        if (caller != b.guest || b.st != S_ESCROWED || block.timestamp >= b.checkOut) pred = MUST_REVERT;
+        if (caller != b.guest || b.st != S_ESCROWED || _bnow(b) >= b.checkOut) pred = MUST_REVERT;
         _settleAction(i, caller, abi.encodeCall(IEscrow.cancelByGuest, (b.id)), pred, O_CANCEL_GUEST, "cancelByGuest");
     }
 
@@ -631,15 +638,15 @@ contract C9Handler is C9Base {
         if (gb.length == 0) return;
         uint256 i = _pickState(idx, S_ESCROWED, S_ESCROWED);
         GB storage b = gb[i];
-        if (b.st == S_ESCROWED && block.timestamp < b.checkOut && (contestedSeed >> 128) % 2 == 0) {
-            vm.warp(uint256(b.checkOut) + (contestedSeed >> 64) % GRACE); // into the dispute window
+        if (b.st == S_ESCROWED && _bnow(b) < b.checkOut && (contestedSeed >> 128) % 2 == 0) {
+            vm.warp(uint256(b.checkOut) + b.frozenTotal + (contestedSeed >> 64) % GRACE); // into the dispute window
         }
         uint256 c = _bound(contestedSeed, 0, b.principal + 1);
         if (contestedSeed % 4 == 0) c = b.principal;
         address caller = asAttacker ? attacker : b.guest;
         uint8 pred = MUST_OK;
         if (caller != b.guest || b.st != S_ESCROWED) pred = MUST_REVERT;
-        if (block.timestamp < b.checkOut || block.timestamp >= uint256(b.checkOut) + GRACE) pred = MUST_REVERT;
+        if (_bnow(b) < b.checkOut || _bnow(b) >= uint256(b.checkOut) + GRACE) pred = MUST_REVERT;
         if (c == 0 || c > b.principal) pred = MUST_REVERT;
         Ledger memory saved = L;
         _accrue(_assets());
@@ -800,7 +807,7 @@ contract C9Handler is C9Base {
         uint256 i = _pick(idx);
         GB storage b = gb[i];
         uint8 pred = MUST_OK;
-        if (b.st != S_ESCROWED || block.timestamp < uint256(b.checkOut) + GRACE) pred = MUST_REVERT;
+        if (b.st != S_ESCROWED || _bnow(b) < uint256(b.checkOut) + GRACE) pred = MUST_REVERT;
         _settleAction(i, _claimant(who), abi.encodeCall(IEscrow.settle, (b.id)), pred, O_COMPLETED, "settle");
     }
 
@@ -840,7 +847,9 @@ contract C9Handler is C9Base {
         _creditFee(f.feeRecipient, f.fee);
         if (f.y > 0) _count("ok:settlementWithYield");
         if (f.gY > 0) _count("ok:guestYieldVested");
-        if (L.lossDebt > 0) {
+        // Amended (docs/adr/0015 §4): yield is deferred while any loss is active, lossDebt or an
+        // observed shortfall, so it is never paid ahead of guest principal.
+        if (L.lossDebt > 0 || L.since != 0) {
             if (f.y > 0) _count("ok:yieldDeferred");
             pendG[guest] += f.gY; // spec 6.4, ADR 0010 section 3
             L.pendO += f.oY;
@@ -961,14 +970,12 @@ contract C9Handler is C9Base {
         if (caller != guardian || (b.st != S_ESCROWED && b.st != S_DISPUTED) || b.frozenTotal >= MAX_FREEZE) {
             pred = MUST_REVERT;
         }
-        Ledger memory saved = L;
-        _accrue(_assets());
+        // Amended (docs/adr/0015 §3): freeze moves no funds, so it does not accrue (like pause).
+        uint256 laBefore = escV.lastAssets();
         (bool ok, bytes memory ret,) = _call(caller, abi.encodeCall(IEscrow.freezeBooking, (b.id)));
         _judge(K_AUTH, "freezeBooking", pred, ok, ret);
-        if (!ok) {
-            L = saved;
-            return;
-        }
+        if (!ok) return;
+        if (escV.lastAssets() != laBefore) _flag(K_RULE4, "freezeBooking changed the books");
         b.frozenFrom = b.st;
         b.st = S_FROZEN;
         b.frozenSince = uint40(block.timestamp);
@@ -986,15 +993,12 @@ contract C9Handler is C9Base {
         if (b.st != S_FROZEN) pred = MUST_REVERT;
         else if (caller != guardian && total < MAX_FREEZE) pred = MUST_REVERT;
         else if (caller != guardian && total == MAX_FREEZE) pred = EITHER; // "once the budget is used"
-        Ledger memory saved = L;
-        _accrue(_assets());
+        uint256 laBefore = escV.lastAssets(); // no accrue (docs/adr/0015 §3)
         bytes memory ret;
         (ok, ret,) = _call(caller, abi.encodeCall(IEscrow.unfreezeBooking, (b.id)));
         _judge(K_AUTH, "unfreezeBooking", pred, ok, ret);
-        if (!ok) {
-            L = saved;
-            return false;
-        }
+        if (!ok) return false;
+        if (escV.lastAssets() != laBefore) _flag(K_RULE4, "unfreezeBooking changed the books");
         b.st = b.frozenFrom;
         uint32 onChain = esc.getBooking(b.id).frozenTotal;
         uint256 capped = total > MAX_FREEZE ? MAX_FREEZE : total;
@@ -1436,7 +1440,7 @@ contract C9Handler is C9Base {
         uint256 far = block.timestamp;
         for (uint256 i; i < gb.length; i++) {
             if (gb[i].st == S_FROZEN && !_unfreeze(i, guardian)) _flag(K_P11, "guardian cannot unfreeze");
-            uint256 t = uint256(gb[i].checkOut) + GRACE + 1;
+            uint256 t = uint256(gb[i].checkOut) + GRACE + gb[i].frozenTotal + 1; // booking clock (ADR 0015 §1)
             if (t > far) far = t;
             if (gb[i].st == S_DISPUTED && ghostDeadline(i) + 1 > far) far = ghostDeadline(i) + 1;
         }

@@ -474,3 +474,23 @@ Until then, the default `forge test` run reports these three failures. Exclude t
 - **Reentrancy through the vault or USDC:** `nonReentrant` on every state-changing function, and CEI
   in `claim`.
 - **Inflation attack:** the seed, offset and `VaultMintedNoShares` bound the residual (ADR 0013 §1).
+
+---
+
+## Disposition (added by the implementer, 2026-09-27)
+
+Decided in [ADR 0015](../adr/0015-review-0004-fixes.md). Each fix follows the prior art cited there.
+
+| Finding | Outcome |
+|---|---|
+| R1 | Fixed: the booking's clock (`now − frozenTotal`) for guest checks **and `settle`**. Settle moves too, otherwise it could pre-empt the extended dispute window. `cancelByProperty` keeps real time. |
+| R2 | Fixed with the review's option 2 (Yearn): `redeem` is allowed and `claim` pulls best-effort from a written-off vault. The value is booked before paying; this fixes a `lastAssets` underflow found by the new tests. |
+| R5 | Fixed: freeze and unfreeze no longer read the vault. |
+| R7 | Fixed: yield is deferred while any loss is active. |
+| R3, R4, R6 | Accepted; the owner allowed privileged platform powers. Recorded as spec concerns. |
+| R8 | Accepted; the new stranded-vault path measures balance deltas. |
+| R9 | Passed to C6 in its brief. |
+
+All three PoCs now pass. In the R2 PoC, one line was changed: `redeem` during a write-off now
+succeeds.
+

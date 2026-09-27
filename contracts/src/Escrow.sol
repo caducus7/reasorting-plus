@@ -231,8 +231,9 @@ contract Escrow is
         _promoteTimelocks();
         Booking storage b = _escrowed(bookingId);
         if (msg.sender != b.guest) revert NotGuest();
-        if (block.timestamp >= b.checkOutUtc) revert NotCancellable();
-        uint16 bps = QuoteLib.refundBps(_cutoffs[bookingId], b.finalBps, b.checkInUtc, block.timestamp);
+        uint256 t = _bookingNow(b);
+        if (t >= b.checkOutUtc) revert NotCancellable();
+        uint16 bps = QuoteLib.refundBps(_cutoffs[bookingId], b.finalBps, b.checkInUtc, t);
         emit BookingCancelled(bookingId, Outcome.CANCELLED_BY_GUEST, bps);
         _settle(bookingId, b, bps, false, Outcome.CANCELLED_BY_GUEST);
     }
@@ -252,7 +253,9 @@ contract Escrow is
         _accrue();
         _promoteTimelocks();
         Booking storage b = _escrowed(bookingId);
-        if (block.timestamp < uint256(b.checkOutUtc) + Params.GRACE) revert SettleTooEarly();
+        // Shifted with the guest's dispute window, so settlement cannot pre-empt a dispute the guest
+        // may still open after a freeze (docs/adr/0015 §1).
+        if (_bookingNow(b) < uint256(b.checkOutUtc) + Params.GRACE) revert SettleTooEarly();
         _settle(bookingId, b, 0, true, Outcome.COMPLETED);
     }
 
@@ -262,6 +265,14 @@ contract Escrow is
         private
     {
         LedgerLib.settle(_l, b, bookingId, refundBps, vested, outcome, factory.feeRecipient());
+    }
+
+    /// @dev The booking's clock: real time minus the time it spent frozen. A freeze stops the guest's
+    /// policy clock and GRACE, as ADR 0011 already does for the dispute deadline (docs/adr/0015 §1;
+    /// Aave's liquidation grace period after an unpause is the same principle).
+    /// `cancelByProperty` keeps real time: an owner cannot evict a guest mid-stay.
+    function _bookingNow(Booking storage b) private view returns (uint256) {
+        return block.timestamp - b.frozenTotal;
     }
 
     function _escrowed(bytes32 bookingId) private view returns (Booking storage b) {
@@ -283,8 +294,9 @@ contract Escrow is
         _accrue();
         _promoteTimelocks();
         Booking storage b = _escrowed(bookingId);
-        if (block.timestamp < b.checkOutUtc) revert NotDelivered();
-        if (block.timestamp >= uint256(b.checkOutUtc) + Params.GRACE) revert DisputeTooLate();
+        uint256 t = _bookingNow(b);
+        if (t < b.checkOutUtc) revert NotDelivered();
+        if (t >= uint256(b.checkOutUtc) + Params.GRACE) revert DisputeTooLate();
         if (msg.sender != b.guest) revert NotGuest();
         if (contestedAtomic == 0 || contestedAtomic > b.principalAtomic) revert InvalidContested();
         DisputeLib.open(
@@ -356,15 +368,18 @@ contract Escrow is
     function claim() external nonReentrant returns (uint256 paid) {
         _accrue();
         _promoteTimelocks();
-        paid = LedgerLib.claim(_l, usdc, _activeVault(), msg.sender, msg.sender == payoutAddress);
+        paid = LedgerLib.claim(
+            _l, usdc, _activeVault(), vaultWrittenOff ? vault : IERC4626(address(0)), msg.sender, msg.sender == payoutAddress
+        );
     }
 
     // ==========================================================================================
     // Guardian (spec 3.3, 3.5; docs/adr/0007)
 
     /// @inheritdoc IEscrow
+    /// @dev Moves no funds and changes no accounting parameter, so like pause it does not read the
+    /// vault: a broken vault must not stop the guardian (docs/adr/0013 §2, 0015 §3).
     function freezeBooking(bytes32 bookingId) external onlyGuardian nonReentrant {
-        _accrue();
         Booking storage b = _bookings[bookingId];
         BookingState s = b.state;
         if (s != BookingState.ESCROWED && s != BookingState.DISPUTED) revert NotFreezable();
@@ -377,9 +392,8 @@ contract Escrow is
 
     /// @inheritdoc IEscrow
     /// @dev The guardian may unfreeze at any time; anyone may once the booking's remaining freeze
-    /// budget is used up. Time frozen does not extend GRACE (spec 3.5).
+    /// budget is used up. Time frozen stops the booking's clock (docs/adr/0015 §1). No vault read.
     function unfreezeBooking(bytes32 bookingId) external nonReentrant {
-        _accrue();
         Booking storage b = _bookings[bookingId];
         if (b.state != BookingState.FROZEN) revert NotFrozen();
         uint256 elapsed = block.timestamp - b.frozenSince;
@@ -529,8 +543,9 @@ contract Escrow is
 
     /// @inheritdoc IEscrow
     /// @dev Allowed during a loss: the rebalancer may always move funds back to idle (spec 6.4).
+    /// While written off, redeeming is still allowed: Yearn's "all possible assets should be removed"
+    /// (docs/adr/0015 §2). The value lands in idle, which accounting counts.
     function redeem(uint256 assets) external onlyRebalancer nonReentrant {
-        if (vaultWrittenOff) revert VaultIsWrittenOff();
         _accrue();
         if (address(vault) == address(0)) revert NoVault();
         if (assets == 0) revert ZeroAmount();
@@ -652,7 +667,7 @@ contract Escrow is
     function bookingState(bytes32 bookingId) external view returns (BookingState s) {
         Booking storage b = _bookings[bookingId];
         s = b.state;
-        if (s == BookingState.ESCROWED && block.timestamp >= b.checkOutUtc) s = BookingState.DELIVERED;
+        if (s == BookingState.ESCROWED && _bookingNow(b) >= b.checkOutUtc) s = BookingState.DELIVERED;
     }
 
     function getBooking(bytes32 bookingId) external view returns (Booking memory) {
@@ -666,8 +681,9 @@ contract Escrow is
     /// @notice Refund bps if the guest cancelled now. Reverts when not cancellable.
     function refundBpsNow(bytes32 bookingId) external view returns (uint16) {
         Booking storage b = _escrowed(bookingId);
-        if (block.timestamp >= b.checkOutUtc) revert NotCancellable();
-        return QuoteLib.refundBps(_cutoffs[bookingId], b.finalBps, b.checkInUtc, block.timestamp);
+        uint256 t = _bookingNow(b);
+        if (t >= b.checkOutUtc) revert NotCancellable();
+        return QuoteLib.refundBps(_cutoffs[bookingId], b.finalBps, b.checkInUtc, t);
     }
 
     function claimableOf(address account) external view returns (uint256) {

@@ -19,6 +19,8 @@ export type BookingView = {
   guestYieldBps: number;
   finalBps: number;
   cutoffs: Cutoff[];
+  /** Seconds the booking spent frozen: its policy clock runs this far behind (docs/adr/0015 §1). */
+  frozenTotal: number;
   /** Guest's share of yield accrued so far (open), or credited at settlement (settled). */
   accruedGuestYieldAtomic: bigint;
   /** What the guest can claim now on this escrow (claim buckets are per address, ADR 0003). */
@@ -60,6 +62,7 @@ export function chainReadModel(client: PublicClient, escrow: Address, fromBlock:
         resourceId: Hex;
         principalAtomic: bigint;
         accAtDeposit: bigint;
+        frozenTotal: number;
       }>("getBooking", [bookingId]);
       if (b.state === 0) return null;
       const [derived, cutoffs, acc, claimable, deposits] = await Promise.all([
@@ -96,6 +99,7 @@ export function chainReadModel(client: PublicClient, escrow: Address, fromBlock:
         feeBps: Number(b.feeBps),
         guestYieldBps: Number(b.guestYieldBps),
         finalBps: Number(b.finalBps),
+        frozenTotal: Number(b.frozenTotal),
         cutoffs: cutoffs.map((c) => ({ cutoffUtc: Number(c.cutoffUtc), refundBps: Number(c.refundBps) })),
         accruedGuestYieldAtomic: accrued,
         claimableAtomic: claimable,

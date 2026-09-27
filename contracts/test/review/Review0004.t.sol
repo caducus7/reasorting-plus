@@ -82,8 +82,7 @@ contract Review0004Test is YieldTestBase {
         vm.expectRevert(NotOwnerOrGuardian.selector);
         escrow.recoverVault();
         vm.prank(rebalancer);
-        vm.expectRevert(VaultIsWrittenOff.selector);
-        escrow.redeem(1 * USDC);
+        escrow.redeem(1 * USDC); // fixed by docs/adr/0015 §2: redeeming stays allowed while written off
 
         // The guest cancels in the 100% tier and claims.
         vm.prank(guest);

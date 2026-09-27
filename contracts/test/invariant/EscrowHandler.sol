@@ -143,9 +143,11 @@ contract EscrowHandler is Test {
         bytes32 id = ids[idSeed % ids.length];
         Quote storage q = quotes[id];
         if (settled[id] || escrow.getBooking(id).state != BookingState.ESCROWED) return;
-        if (block.timestamp >= q.checkOutUtc) return;
+        // The booking's clock: frozen time does not count (docs/adr/0015 §1).
+        uint256 t = block.timestamp - escrow.getBooking(id).frozenTotal;
+        if (t >= q.checkOutUtc) return;
 
-        uint256 expectedBps = _specRefundBps(q, block.timestamp);
+        uint256 expectedBps = _specRefundBps(q, t);
         uint256 expected = (q.priceAtomic * expectedBps + 9_999) / 10_000; // ceil, spec 4.4
         uint256 before = escrow.guestClaimable(q.guest);
         vm.prank(q.guest);
@@ -174,7 +176,7 @@ contract EscrowHandler is Test {
         bytes32 id = ids[idSeed % ids.length];
         Quote storage q = quotes[id];
         if (settled[id] || escrow.getBooking(id).state != BookingState.ESCROWED) return;
-        if (block.timestamp < uint256(q.checkOutUtc) + 72 hours) return;
+        if (block.timestamp - escrow.getBooking(id).frozenTotal < uint256(q.checkOutUtc) + 72 hours) return;
         uint256 feeBefore = escrow.feeClaimable(factory.feeRecipient());
         escrow.settle(id);
         uint256 fee = q.priceAtomic * q.feeBps / 10_000;

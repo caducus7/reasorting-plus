@@ -389,7 +389,7 @@ export function createApp(d: Deps): Hono {
     const b = a.booking;
     const tz = zoneOf(b.resourceId);
     const chainNow = (await d.chain.liveTerms()).blockTimestamp;
-    const bps = b.state === "ESCROWED" ? refundBpsAt(b, chainNow) : null;
+    const bps = b.state === "ESCROWED" ? refundBpsAt(b, chainNow - b.frozenTotal) : null; // booking clock
     const policy = await policyOf(bookingId);
     return send(c, v1.BookingResponse, {
       state: b.state,
@@ -418,7 +418,7 @@ export function createApp(d: Deps): Hono {
     if (a instanceof Response) return a;
     const b = a.booking;
     const chainNow = (await d.chain.liveTerms()).blockTimestamp;
-    const bps = b.state === "ESCROWED" ? refundBpsAt(b, chainNow) : null;
+    const bps = b.state === "ESCROWED" ? refundBpsAt(b, chainNow - b.frozenTotal) : null; // booking clock
     if (bps === null) return fail(c, 409, "not_cancellable");
     return send(c, v1.CancelPreviewResponse, {
       refundAtomic: toAtomicString(refundOf(b.principalAtomic, bps)),

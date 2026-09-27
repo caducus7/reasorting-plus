@@ -277,8 +277,12 @@ contract DisputeTest is YieldTestBase {
         vm.prank(guardian);
         escrow.unfreezeBooking(id);
         _toDelivered();
+        vm.expectRevert(NotDelivered.selector); // the booking's clock is 5 days behind (ADR 0015 §1)
+        vm.prank(guest);
+        escrow.openDispute(id, 1, keccak256("e"));
+        vm.warp(block.timestamp + 5 days);
         _open(1);
-        assertEq(escrow.disputeDeadline(id), block.timestamp + 14 days);
+        assertEq(escrow.disputeDeadline(id), block.timestamp + 14 days, "the earlier freeze adds nothing after opening");
     }
 
     // ================================================================== brief test 1: conservation

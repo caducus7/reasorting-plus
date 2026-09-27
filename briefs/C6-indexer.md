@@ -58,6 +58,10 @@ iCal (C7), rebalancer (C8), the owner dashboard and digest UI (agent workstream)
 - The quote service releases a quoted slot's hold only when this row exists and the deposit is at the
   safe head. There is no indexing-latency requirement.
 
+- `Claimed`, `LossRecognised` and the settlement events merge claim buckets (review 0004 R9). The
+  ledger projection must replicate the contract's debit order (guest, then fee, then owner) and the
+  guest-first gating during a loss. The yield deferral rule is in ADR 0015 §4.
+
 ## Watch for
 
 - The projection must never hold state replay can't reproduce. No manual fixes in the DB.
