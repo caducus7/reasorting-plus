@@ -24,28 +24,55 @@ Check-in and check-out times use the same rules. The stay is validated against t
 
 - `holds` carries `EXCLUDE USING gist (resource_id WITH =, stay WITH &&) WHERE (active)`. Two
   overlapping active holds cannot exist.
-- Creating a hold also takes `pg_advisory_xact_lock` on the resource. Without the lock, concurrent
-  overlapping inserts can deadlock inside the exclusion check (40P01), and a guest would get a 500
-  instead of a 409. The C5 test suite found this. The constraint remains the backstop.
+- Creating a hold first takes a transaction-level advisory lock on the resource, keyed by the first
+  8 bytes of `sha256("hold:" + resourceId)` through the documented `pg_advisory_xact_lock(bigint)`.
+  - Without it, concurrent overlapping inserts can deadlock inside the exclusion check (40P01), and a
+    guest gets a 500 instead of a 409. The C5 test suite found this.
+  - PostgreSQL's executor source calls that deadlock "fairly harmless … although you get a different
+    error message" (`execIndexing.c`). So this is about the error code, not safety.
+  - The fix follows the PostgreSQL docs ("Deadlocks"): take the most restrictive lock first, in a
+    consistent order. As the docs' second remedy, a transaction aborted with 40P01 or 40001 is
+    retried, up to 3 attempts.
+  - The exclusion constraint remains the backstop.
 - Expired holds on the slot are released in the same transaction, before the insert.
 - `POST /v1/offers` for a held or blocked slot returns **409 `unavailable`**. The C0 OpenAPI did not
   list a 409 on offers. The zod schemas already had the error code, and only the document changed.
   The agent workstream should confirm this.
 - `resource_id` is canonical lowercase hex everywhere off-chain.
 
-## 3. Quotes: one live quote per offer; the hold outlives the quote
+## 3. Quotes: one live quote per offer; a quoted hold ends only on proof
 
-- Re-preparing with the same guest returns the same quote. Another guest gets 409 `unavailable` while
-  a quote is live. A row lock on the offer serialises concurrent prepares.
+- Re-preparing with the same guest returns the same live quote. Another guest gets 409 `unavailable`
+  while a quote is live. A row lock on the offer serialises concurrent prepares.
 - Once the 25-minute offer lock has lapsed with no quote, prepare returns 409 `terms_changed`, and the
   guest takes a fresh offer.
-- A quote lives for `QUOTE_TTL_SEC` (900 s), in **chain time**.
-- The hold is extended to quote expiry + `HOLD_GRACE_SEC` (600 s). The contract has no overlap check
-  (spec 4.2, 9). A deposit made just before expiry must reach `calendar_blocks` through C6 before
-  the slot can be offered again. **C6 must index a deposit into `calendar_blocks` within
-  `HOLD_GRACE_SEC`.**
-- A replacement quote for the same offer is refused (409 `unavailable`) if any earlier quote's
-  bookingId exists on-chain. A guest cannot pay twice while the indexer catches up.
+- A quote lives for `QUOTE_TTL_SEC` (900 s), in **chain time**. It is the latest block's timestamp
+  plus the TTL, as Uniswap's interface computes swap deadlines.
+- **The hold awaits payment.** Once a quote is signed, the hold stops expiring on the server clock
+  (`migrations/003`). The contract has no overlap check (spec 4.2, 9), so the slot may be released
+  only on proof, never on a timer:
+  - **Handed over:** the indexer (C6) has written the escrow booking into `calendar_blocks`, which
+    takes over blocking the slot.
+  - **Proven unpaid:** the chain's **safe** head is past the quote's `expiresAt`, and the booking does
+    not exist at that block.
+    - The escrow rejects an expired quote for good (`block.timestamp > expiresAt` gives
+      `QuoteExpired`), so no deposit with that quote can appear later.
+    - On the OP Stack every block up to the safe head is derived from the canonical L1 chain, so the
+      sequencer cannot reorg it away (OP specs, `derivation.md`).
+    - Measured on Base on 2026-09-27: safe trails latest by 15 blocks (about 30 s), so an unpaid slot
+      frees about 30 s after its quote expires.
+- **Precedent.** Stripe Checkout ends a session on the provider's authoritative `expired` state and
+  events (`checkout.session.expired`; `async_payment_succeeded`/`_failed` for asynchronous methods),
+  not on a merchant-side timer. The chain is our provider.
+- **This replaces the earlier `HOLD_GRACE_SEC` (600 s).** That was a timer that assumed C6 indexes
+  within 10 minutes. There is now no timing assumption about the indexer. A paid slot stays held
+  until C6 projects it, however long that takes.
+- **An expired quote ends its offer.** Prepare returns 409 `unavailable` until the quote is proven
+  unpaid, then 409 `terms_changed`, and the guest takes a fresh offer. No replacement quote is ever
+  signed for an offer, so a guest cannot pay twice.
+- **Where proofs run.** They are evaluated lazily when availability, offers or prepare touch a slot
+  with an awaiting hold. That costs one `eth_getBlockByNumber("safe")` and one `getBooking` per
+  awaiting hold.
 
 ## 4. Fail closed
 
@@ -61,9 +88,13 @@ Prepare returns 409 `unavailable` and signs nothing when any of these holds:
 Prepare returns 500 and signs nothing when any of these holds:
 
 - the escrow's `quoteSigner` is not this service's key;
-- chain time and the server clock differ by more than `MAX_CLOCK_SKEW_SEC` (120 s). Hold liveness
-  uses the server clock and quote expiry uses chain time, so a skew would let a hold lapse before
-  its quote.
+- chain time and the server clock differ by more than `MAX_CLOCK_SKEW_SEC` (120 s).
+  - Why it matters: the offer lock and the stored quote's liveness use the server clock, while quote
+    expiry uses chain time.
+  - On Base, chain time tracks wall time by construction: one block every 2 s from genesis (OP specs,
+    `derivation.md`). A larger gap therefore means a halted sequencer, a stale RPC node or a broken
+    server clock, and prepare fails closed.
+  - This is the off-chain counterpart of Aave's `PriceOracleSentinel` (an L2 sequencer-uptime gate).
 
 ## 5. Fees: live, and never straddling a change
 

@@ -55,7 +55,6 @@ const app = createApp({
     offerLockSec: env.OFFER_LOCK_SEC,
     quoteTtlSec: env.QUOTE_TTL_SEC,
     feedMaxAgeSec: env.FEED_MAX_AGE_SEC,
-    holdGraceSec: env.HOLD_GRACE_SEC,
     maxClockSkewSec: env.MAX_CLOCK_SKEW_SEC,
     apyEstimateBps: env.APY_ESTIMATE_BPS,
     yieldProtocol: env.YIELD_PROTOCOL,

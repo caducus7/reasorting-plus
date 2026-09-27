@@ -31,7 +31,6 @@ export const Env = z
     OFFER_LOCK_SEC: int(60, 3_600).default(1_500), // spec 5.2: 25 minutes
     QUOTE_TTL_SEC: int(60, 3_600).default(900),
     FEED_MAX_AGE_SEC: int(60, 86_400).default(900),
-    HOLD_GRACE_SEC: int(60, 3_600).default(600),
     MAX_CLOCK_SKEW_SEC: int(5, 600).default(120),
     APY_ESTIMATE_BPS: int(0, 10_000).default(400),
     YIELD_PROTOCOL: z.string().default("Aave V3 USDC on Base"),

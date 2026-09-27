@@ -3,7 +3,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { createOfferWithHold, migrate, recordQuote, SlotTaken, slotHeldByOther, type Db } from "../src/db.js";
+import { createOfferWithHold, migrate, recordQuote, SlotTaken, slotHeldByOther, type Db, holdLockKey } from "../src/db.js";
 import { freshDb } from "./pgtest.js";
 
 const R = `0x${"44".repeat(32)}`;
@@ -113,5 +113,13 @@ describe("soft holds", () => {
   it("migrations are idempotent", async () => {
     await migrate(db);
     await migrate(db);
+  });
+
+  it("advisory-lock key: deterministic, case-insensitive, a signed 64-bit value per resource", () => {
+    const k = holdLockKey(R);
+    expect(holdLockKey(R.toUpperCase().replace("0X", "0x"))).toBe(k);
+    expect(k).toBe(holdLockKey(R));
+    expect(k >= -(2n ** 63n) && k < 2n ** 63n).toBe(true);
+    expect(holdLockKey(`0x${"45".repeat(32)}`)).not.toBe(k);
   });
 });

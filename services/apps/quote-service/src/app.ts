@@ -18,8 +18,11 @@ import {
   createOfferWithHold,
   getOffer,
   holdIsLive,
+  awaitingHoldOfOffer,
+  awaitingHolds,
+  releaseAwaitingHold,
+  type AwaitingHold,
   liveQuoteForOffer,
-  quotedBookingIds,
   recordQuote,
   SlotTaken,
   slotHeldByOther,
@@ -38,7 +41,6 @@ export type Settings = {
   offerLockSec: number; // spec 5.2: 25 minutes
   quoteTtlSec: number; // prepared quote lifetime (docs/adr/0012)
   feedMaxAgeSec: number; // fail closed beyond this (docs/adr/0012)
-  holdGraceSec: number; // hold outlives a quote by this, covering indexer lag (docs/adr/0012)
   maxClockSkewSec: number; // chain time vs server clock; holds use one, quotes the other
   apyEstimateBps: number;
   yieldProtocol: string;
@@ -110,7 +112,38 @@ export function createApp(d: Deps): Hono {
     }
   };
 
+  /**
+   * Ends an awaiting-payment hold only on proof (docs/adr/0012 §3), like a Stripe Checkout Session
+   * that ends on the provider's authoritative state rather than a local timer:
+   *  - handed over: the indexer projected the escrow booking into calendar_blocks;
+   *  - unpaid: the chain's safe head is past the quote's expiry (the escrow rejects an expired quote
+   *    for good) and the booking does not exist at that block.
+   * Otherwise the hold stays, however long the indexer or the chain takes.
+   */
+  async function resolveHold(h: AwaitingHold): Promise<"handed-over" | "unpaid" | "pending"> {
+    if (await d.calendar.hasEscrowBooking(h.resource_id, h.booking_id)) {
+      await releaseAwaitingHold(d.db, h);
+      return "handed-over";
+    }
+    try {
+      const head = await d.chain.safeHead();
+      if (head.timestamp > h.until && !(await d.chain.bookingExistsAt(h.booking_id as Hex, head.number))) {
+        await releaseAwaitingHold(d.db, h);
+        return "unpaid";
+      }
+    } catch (e) {
+      // No proof without the chain: the hold stays (fail closed), and the endpoint still answers.
+      console.error("hold resolution: chain read failed", e);
+    }
+    return "pending";
+  }
+
+  async function resolveSlot(resourceId: string, checkIn: string, checkOut: string) {
+    for (const h of await awaitingHolds(d.db, resourceId, checkIn, checkOut)) await resolveHold(h);
+  }
+
   async function available(p: Property, checkIn: string, checkOut: string, exceptOffer: string | null) {
+    await resolveSlot(p.resourceId, checkIn, checkOut);
     if (await d.calendar.isBusy(p.resourceId, checkIn, checkOut)) return false;
     return !(await slotHeldByOther(d.db, p.resourceId, checkIn, checkOut, now(), exceptOffer));
   }
@@ -153,6 +186,7 @@ export function createApp(d: Deps): Hono {
     if (body.data.guests > p.maxGuests) return fail(c, 400, "invalid_stay");
     const stay = materialise(p, body.data.checkIn, body.data.checkOut, unixNow());
     if (stay === "invalid") return fail(c, 400, "invalid_stay");
+    await resolveSlot(p.resourceId, stay.checkIn, stay.checkOut);
     if (await d.calendar.isBusy(p.resourceId, stay.checkIn, stay.checkOut)) return fail(c, 409, "unavailable");
 
     const offerId = randomUUID();
@@ -212,14 +246,15 @@ export function createApp(d: Deps): Hono {
       if (live.guest !== guest.toLowerCase()) return send(c, v1.PrepareConflict, { error: "unavailable" }, 409);
       return respondPrepared(c, live.booking_id as Hex, live.quote as v1.Quote, live.quote_sig as Hex, live.expires_at);
     }
+    // The offer's quote has expired. The offer ends only once that quote is proven unpaid (then the
+    // guest takes a fresh offer); until then no replacement is signed, so no one can pay twice.
+    const quoted = await awaitingHoldOfOffer(d.db, offerId);
+    if (quoted) {
+      const outcome = await resolveHold(quoted);
+      return send(c, v1.PrepareConflict, { error: outcome === "unpaid" ? "terms_changed" : "unavailable" }, 409);
+    }
     // The 25-minute price lock has lapsed: the guest must take a fresh offer (docs/adr/0012).
     if (!(await holdIsLive(d.db, offerId, t))) return send(c, v1.PrepareConflict, { error: "terms_changed" }, 409);
-
-    // A replacement quote (the previous one expired) must not let the guest pay twice: if any
-    // earlier quote for this offer was deposited and the indexer has not caught up, stop here.
-    for (const prev of await quotedBookingIds(d.db, offerId)) {
-      if (await d.bookings.getBooking(prev as Hex)) return send(c, v1.PrepareConflict, { error: "unavailable" }, 409);
-    }
 
     // Re-check availability against every calendar source, and fail closed on stale feeds.
     if (!(await available(p, offer.check_in, offer.check_out, offerId))) {
@@ -287,7 +322,7 @@ export function createApp(d: Deps): Hono {
       quote,
       quoteSig,
       expiresAt: new Date(expiresAt * 1000),
-      holdUntil: new Date((expiresAt + s.holdGraceSec) * 1000),
+      expiresAtChain: expiresAt,
       now: t,
     });
     if (recorded === "conflict") return send(c, v1.PrepareConflict, { error: "unavailable" }, 409);

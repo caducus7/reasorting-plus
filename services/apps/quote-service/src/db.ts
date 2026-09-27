@@ -1,6 +1,7 @@
 // Postgres access (node-postgres). Timestamps are passed in explicitly (chain time), never read from
 // the database clock, so every expiry decision uses the same notion of "now" as the contract.
 
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -55,19 +56,43 @@ export type OfferRow = {
 export class SlotTaken extends Error {}
 
 const EXCLUSION_VIOLATION = "23P01";
+const RETRYABLE = new Set(["40P01", "40001"]); // deadlock_detected, serialization_failure
+
+/**
+ * Advisory-lock key for a resource's holds: the first 8 bytes of sha256, as the documented
+ * `pg_advisory_xact_lock(bigint)` argument. Computed here rather than with the server's
+ * undocumented hashtextextended(), whose output carries no stability guarantee.
+ */
+export function holdLockKey(resourceId: string): bigint {
+  return createHash("sha256").update(`hold:${resourceId.toLowerCase()}`).digest().readBigInt64BE(0);
+}
 
 /**
  * Inserts an offer and its soft hold atomically. Expired holds on the slot are released first in
  * the same transaction; an overlapping active hold makes the insert fail with SlotTaken.
+ *
+ * Concurrency (PostgreSQL docs, "Deadlocks"): exclusion-constraint checks can deadlock when two
+ * backends insert conflicting rows at once (execIndexing.c: "fairly harmless ... although you get
+ * a different error message"). The docs' first remedy is to take the most restrictive lock first,
+ * in a consistent order: a transaction-level advisory lock per resource. The second is to retry
+ * transactions aborted by a deadlock, kept here as a bounded backstop.
  */
 export async function createOfferWithHold(db: Db, o: Omit<OfferRow, "expires_at"> & { now: Date; expiresAt: Date }) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await createOfferWithHoldOnce(db, o);
+    } catch (e) {
+      if (attempt < 3 && RETRYABLE.has((e as { code?: string }).code ?? "")) continue;
+      throw e;
+    }
+  }
+}
+
+async function createOfferWithHoldOnce(db: Db, o: Omit<OfferRow, "expires_at"> & { now: Date; expiresAt: Date }) {
   const c = await db.connect();
   try {
     await c.query("BEGIN");
-    // Serialise hold creation per resource. Without this, concurrent overlapping inserts can
-    // deadlock inside the exclusion check (40P01) and a guest sees a 500 instead of a clean 409.
-    // The exclusion constraint stays as the backstop.
-    await c.query("SELECT pg_advisory_xact_lock(hashtextextended('hold:' || $1, 0))", [o.resource_id]);
+    await c.query("SELECT pg_advisory_xact_lock($1::bigint)", [holdLockKey(o.resource_id).toString()]);
     await c.query(
       "UPDATE holds SET active = false WHERE active AND resource_id = $1 AND expires_at <= $2 AND stay && daterange($3::date, $4::date)",
       [o.resource_id, o.now, o.check_in, o.check_out],
@@ -141,15 +166,40 @@ export async function liveQuoteForOffer(db: Db, offerId: string, now: Date): Pro
   return (r.rows[0] as QuoteRow | undefined) ?? null;
 }
 
-/** Every bookingId ever quoted for the offer, newest first (expired ones included). */
-export async function quotedBookingIds(db: Db, offerId: string): Promise<string[]> {
-  const r = await db.query("SELECT booking_id FROM quotes WHERE offer_id = $1 ORDER BY created_at DESC", [offerId]);
-  return r.rows.map((x: { booking_id: string }) => x.booking_id);
+/** A hold whose quote was signed: released only on proof (migrations/003, docs/adr/0012 §3). */
+export type AwaitingHold = { offer_id: string; resource_id: string; booking_id: string; until: number };
+
+export async function awaitingHolds(db: Db, resourceId: string, checkIn: string, checkOut: string): Promise<AwaitingHold[]> {
+  const r = await db.query(
+    `SELECT offer_id, resource_id, awaiting_booking_id AS booking_id, awaiting_until::text AS until FROM holds
+       WHERE active AND awaiting_booking_id IS NOT NULL AND resource_id = $1 AND stay && daterange($2::date, $3::date)`,
+    [resourceId, checkIn, checkOut],
+  );
+  return r.rows.map((x) => ({ ...x, until: Number(x.until) }) as AwaitingHold);
+}
+
+export async function awaitingHoldOfOffer(db: Db, offerId: string): Promise<AwaitingHold | null> {
+  const r = await db.query(
+    `SELECT offer_id, resource_id, awaiting_booking_id AS booking_id, awaiting_until::text AS until FROM holds
+       WHERE active AND awaiting_booking_id IS NOT NULL AND offer_id = $1`,
+    [offerId],
+  );
+  const x = r.rows[0];
+  return x ? ({ ...x, until: Number(x.until) } as AwaitingHold) : null;
+}
+
+/** Releases an awaiting hold, only if it still awaits the same booking. */
+export async function releaseAwaitingHold(db: Db, h: AwaitingHold): Promise<void> {
+  await db.query("UPDATE holds SET active = false WHERE offer_id = $1 AND active AND awaiting_booking_id = $2", [
+    h.offer_id,
+    h.booking_id,
+  ]);
 }
 
 /**
- * Records a signed quote and extends the offer's hold to cover the quote's lifetime. Serialised per
- * offer with a row lock so two concurrent prepares cannot both issue a live quote.
+ * Records a signed quote and turns the offer's hold into an awaiting-payment hold: it stops expiring
+ * on the server clock and is released only on proof (see awaitingHolds). Serialised per offer with
+ * a row lock so two concurrent prepares cannot both issue a live quote.
  */
 export async function recordQuote(
   db: Db,
@@ -164,9 +214,8 @@ export async function recordQuote(
     quote: unknown;
     quoteSig: string;
     expiresAt: Date;
-    /** The hold outlives the quote by this much, so a deposit made just before expiry is indexed
-     * into calendar_blocks before the slot can be offered again (docs/adr/0012 §3). */
-    holdUntil: Date;
+    /** The quote's expiresAt in chain time: after the chain passes it, the escrow rejects the quote. */
+    expiresAtChain: number;
     now: Date;
   },
 ): Promise<"recorded" | "conflict"> {
@@ -185,7 +234,10 @@ export async function recordQuote(
       [q.chainId, q.escrow.toLowerCase(), q.bookingId.toLowerCase(), q.offerId, q.guest.toLowerCase(), q.email,
         q.sessionId, JSON.stringify(q.quote), q.quoteSig, q.expiresAt, q.now],
     );
-    await c.query("UPDATE holds SET expires_at = GREATEST(expires_at, $2) WHERE offer_id = $1", [q.offerId, q.holdUntil]);
+    await c.query(
+      "UPDATE holds SET expires_at = 'infinity', awaiting_booking_id = $2, awaiting_until = $3 WHERE offer_id = $1",
+      [q.offerId, q.bookingId.toLowerCase(), q.expiresAtChain],
+    );
     await c.query("COMMIT");
     return "recorded";
   } catch (e) {
@@ -212,6 +264,8 @@ export interface CalendarPort {
   isBusy(resourceId: string, checkIn: string, checkOut: string): Promise<boolean>;
   /** Channel feeds for the resource whose last successful import is older than `maxAgeSec`. */
   staleFeeds(resourceId: string, now: Date, maxAgeSec: number): Promise<string[]>;
+  /** Has the indexer (C6) projected this escrow booking into the calendar? */
+  hasEscrowBooking(resourceId: string, bookingId: string): Promise<boolean>;
 }
 
 export function pgCalendar(db: Db): CalendarPort {
@@ -230,6 +284,13 @@ export function pgCalendar(db: Db): CalendarPort {
         [resourceId, now, maxAgeSec],
       );
       return r.rows.map((x) => x.feed_id as string);
+    },
+    async hasEscrowBooking(resourceId, bookingId) {
+      const r = await db.query(
+        "SELECT 1 FROM calendar_blocks WHERE resource_id = $1 AND source = 'escrow' AND lower(ref) = $2 LIMIT 1",
+        [resourceId, bookingId.toLowerCase()],
+      );
+      return (r.rowCount ?? 0) > 0;
     },
   };
 }

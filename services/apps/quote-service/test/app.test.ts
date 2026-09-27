@@ -40,6 +40,7 @@ let jwtKey: CryptoKey;
 let deps: Deps;
 let clock: number;
 let terms: LiveTerms;
+let safeLagSec = 30;
 const bookings = new Map<string, BookingView>();
 const signer = localSigner(ANVIL_KEY_2, "test");
 
@@ -51,7 +52,12 @@ beforeAll(async () => {
   deps = {
     db,
     calendar: pgCalendar(db),
-    chain: { liveTerms: async () => ({ ...terms, blockTimestamp: Math.floor(clock / 1000) }) },
+    chain: {
+      liveTerms: async () => ({ ...terms, blockTimestamp: Math.floor(clock / 1000) }),
+      // Safe head trails latest by ~30 s on live Base (measured 2026-09-27: 15 blocks).
+      safeHead: async () => ({ number: 1n, timestamp: Math.floor(clock / 1000) - safeLagSec }),
+      bookingExistsAt: async (id) => bookings.has(id.toLowerCase()),
+    },
     signer,
     bookings: { getBooking: async (id) => bookings.get(id.toLowerCase()) ?? null },
     auth: await jwtAuth({ issuer: "checkout", audience: "booking-api", publicKeyPem: await exportSPKI(kp.publicKey) }),
@@ -63,7 +69,6 @@ beforeAll(async () => {
       offerLockSec: 1_500,
       quoteTtlSec: 900,
       feedMaxAgeSec: 900,
-      holdGraceSec: 600,
       maxClockSkewSec: 120,
       apyEstimateBps: 400,
       yieldProtocol: "Aave V3 USDC on Base",
@@ -89,6 +94,7 @@ beforeEach(async () => {
     totalOpenPrincipal: 0n,
   };
   bookings.clear();
+  safeLagSec = 30;
   await db.query("TRUNCATE offers, holds, quotes, calendar_blocks, channel_feeds CASCADE");
 });
 
@@ -212,28 +218,73 @@ describe("prepare", () => {
     expect(n.rows[0].n).toBe(1);
   });
 
-  it("holds the slot for the quote's life plus the indexer grace, beyond the 25-minute offer lock", async () => {
+  it("holds a quoted slot until the chain proves the quote unpaid, then frees it", async () => {
     const id = (await offer()).body.offerId as string;
     clock = T0 + 20 * 60_000;
-    expect((await prepare(id)).status).toBe(200); // quote to T0+35m, hold to T0+45m
+    expect((await prepare(id)).status).toBe(200); // quote expires T0+35m (chain time)
     clock = T0 + 30 * 60_000;
     expect((await offer("2026-06-11", "2026-06-13")).status).toBe(409);
-    clock = T0 + 44 * 60_000;
+    clock = T0 + 35 * 60_000 + 20_000; // expired, but the safe head (30 s behind) is not past it yet
     expect((await offer("2026-06-11", "2026-06-13")).status).toBe(409);
-    clock = T0 + 46 * 60_000;
+    clock = T0 + 35 * 60_000 + 31_000; // safe head past expiry, booking absent: proven unpaid
     expect((await offer("2026-06-11", "2026-06-13")).status).toBe(200);
   });
 
-  it("re-quotes the same guest after expiry within the grace, but never after a deposit", async () => {
+  it("never frees a paid slot, however long the indexer lags; hands over to calendar_blocks", async () => {
     const id = (await offer()).body.offerId as string;
-    const first = v1.PrepareResponse.parse((await prepare(id)).body);
-    clock = T0 + 16 * 60_000; // quote expired at +15m; hold lives to +25m
-    const second = v1.PrepareResponse.parse((await prepare(id)).body);
-    expect(second.bookingId).not.toBe(first.bookingId);
-    // The second quote was deposited but the indexer has not written calendar_blocks yet.
-    bookings.set(second.bookingId.toLowerCase(), { state: "ESCROWED" } as BookingView);
-    clock = T0 + 32 * 60_000;
+    const r = v1.PrepareResponse.parse((await prepare(id)).body);
+    bookings.set(r.bookingId.toLowerCase(), { state: "ESCROWED" } as BookingView); // deposited, not indexed
+    clock = T0 + 24 * 3_600_000; // a day later, still no indexer
+    expect((await offer("2026-06-11", "2026-06-13")).status).toBe(409);
+    const items = v1.AvailabilityResponse.parse(
+      await (await call("/v1/availability?checkIn=2026-06-10&checkOut=2026-06-14&guests=2")).json(),
+    );
+    expect(items.map((i) => i.name)).toEqual(["Studio"]);
+    // The indexer projects the booking: the hold hands over and the calendar keeps blocking.
+    await db.query("INSERT INTO calendar_blocks VALUES ($1, daterange('2026-06-10','2026-06-14'), 'escrow', $2)", [
+      VILLA.resourceId,
+      r.bookingId,
+    ]);
+    expect((await offer("2026-06-11", "2026-06-13")).status).toBe(409);
+    expect((await db.query("SELECT count(*)::int AS n FROM holds WHERE active")).rows[0].n).toBe(0);
+    // The booking is later cancelled and C6 removes the block: the slot is free again.
+    await db.query("DELETE FROM calendar_blocks");
+    expect((await offer("2026-06-11", "2026-06-13")).status).toBe(200);
+  });
+
+  it("an expired quote ends its offer only on proof; no replacement quote is ever signed", async () => {
+    const id = (await offer()).body.offerId as string;
+    v1.PrepareResponse.parse((await prepare(id)).body);
+    clock = T0 + 15 * 60_000 + 10_000; // quote expired; safe head not yet past it
     expect(await prepare(id)).toEqual({ status: 409, body: { error: "unavailable" } });
+    clock = T0 + 15 * 60_000 + 31_000; // proven unpaid
+    expect(await prepare(id)).toEqual({ status: 409, body: { error: "terms_changed" } });
+    expect((await db.query("SELECT count(*)::int AS n FROM quotes")).rows[0].n).toBe(1);
+  });
+
+  it("an RPC outage leaves quoted holds in place without failing the endpoints", async () => {
+    const id = (await offer()).body.offerId as string;
+    v1.PrepareResponse.parse((await prepare(id)).body);
+    clock = T0 + 60 * 60_000; // long expired: would be provable, but the chain is unreachable
+    const real = deps.chain;
+    deps.chain = { ...real, safeHead: async () => Promise.reject(new Error("rpc down")) };
+    try {
+      expect((await offer("2026-06-11", "2026-06-13")).status).toBe(409);
+      expect((await call("/v1/availability?checkIn=2026-06-10&checkOut=2026-06-14&guests=2")).status).toBe(200);
+      expect(await prepare(id)).toEqual({ status: 409, body: { error: "unavailable" } });
+    } finally {
+      deps.chain = real;
+    }
+    expect((await offer("2026-06-11", "2026-06-13")).status).toBe(200); // chain back: proven unpaid
+  });
+
+  it("a paid offer is never re-quoted", async () => {
+    const id = (await offer()).body.offerId as string;
+    const r = v1.PrepareResponse.parse((await prepare(id)).body);
+    bookings.set(r.bookingId.toLowerCase(), { state: "ESCROWED" } as BookingView);
+    clock = T0 + 2 * 3_600_000;
+    expect(await prepare(id)).toEqual({ status: 409, body: { error: "unavailable" } });
+    expect((await db.query("SELECT count(*)::int AS n FROM quotes")).rows[0].n).toBe(1);
   });
 
   it("returns terms_changed once the offer lock has lapsed without a quote", async () => {
@@ -297,10 +348,10 @@ describe("prepare", () => {
   it("refuses to sign (500) when chain time and the server clock disagree beyond the limit", async () => {
     const id = (await offer()).body.offerId as string;
     const real = deps.chain;
-    deps.chain = { liveTerms: async () => ({ ...(await real.liveTerms()), blockTimestamp: Math.floor(clock / 1000) - 121 }) };
+    deps.chain = { ...real, liveTerms: async () => ({ ...(await real.liveTerms()), blockTimestamp: Math.floor(clock / 1000) - 121 }) };
     try {
       expect((await post(`/v1/offers/${id}/prepare`, { guestAddress: GUEST, email: "g@example.com" })).status).toBe(500);
-      deps.chain = { liveTerms: async () => ({ ...(await real.liveTerms()), blockTimestamp: Math.floor(clock / 1000) - 120 }) };
+      deps.chain = { ...real, liveTerms: async () => ({ ...(await real.liveTerms()), blockTimestamp: Math.floor(clock / 1000) - 120 }) };
       expect((await prepare(id)).status).toBe(200);
     } finally {
       deps.chain = real;

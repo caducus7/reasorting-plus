@@ -276,7 +276,6 @@ describe("quote service against the deployed escrow", () => {
         offerLockSec: 1_500,
         quoteTtlSec: 900,
         feedMaxAgeSec: 900,
-      holdGraceSec: 600,
       maxClockSkewSec: 120,
         apyEstimateBps: 400,
         yieldProtocol: "mock",
@@ -378,5 +377,31 @@ describe("quote service against the deployed escrow", () => {
     await a.mineAt(t + 10);
     const fresh = v1.PrepareResponse.parse(await (await offerAndPrepare("2026-10-01", "2026-10-03", guest)).json());
     expect([fresh.quote.feeBps, fresh.quote.expiresAt - clock]).toEqual([newFee, 900]);
+  });
+
+  /** docs/adr/0012 §3: a quoted hold ends only on proof, read from Anvil's real "safe" tag. */
+  it("frees a quoted slot only once the safe head proves the quote unpaid; a paid slot stays held", async () => {
+    const offerStatus = async (checkIn: string, checkOut: string) => {
+      clock = await a.now();
+      const r = await post("/v1/offers", { resourceId: VILLA.resourceId, checkIn, checkOut, guests: 2, locale: "en" });
+      return r.status;
+    };
+
+    // Unpaid: latest passes expiry first, the safe head (Anvil: latest - 32) later.
+    const unpaid = v1.PrepareResponse.parse(await (await offerAndPrepare("2026-11-10", "2026-11-12", guest)).json());
+    await a.mineAt(unpaid.quote.expiresAt + 5);
+    expect(Number((await a.client.getBlock({ blockTag: "safe" })).timestamp)).toBeLessThanOrEqual(unpaid.quote.expiresAt);
+    expect(await offerStatus("2026-11-10", "2026-11-12")).toBe(409);
+    await a.test.mine({ blocks: 40, interval: 2 });
+    expect(Number((await a.client.getBlock({ blockTag: "safe" })).timestamp)).toBeGreaterThan(unpaid.quote.expiresAt);
+    expect(await offerStatus("2026-11-10", "2026-11-12")).toBe(200);
+
+    // Paid, never indexed (C6 absent): the slot stays held whatever the chain does.
+    const paid = v1.PrepareResponse.parse(await (await offerAndPrepare("2026-12-01", "2026-12-04", guest)).json());
+    await fundGuest(BigInt(paid.quote.priceAtomic));
+    await deposit(paid.quote, paid.quoteSig as Hex);
+    await a.mineAt(paid.quote.expiresAt + 5);
+    await a.test.mine({ blocks: 40, interval: 2 });
+    expect(await offerStatus("2026-12-02", "2026-12-03")).toBe(409);
   });
 });

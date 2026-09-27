@@ -2,7 +2,7 @@
 // from chain ... not from a cache older than the current block"). Every value is read at one
 // pinned block so the terms are mutually consistent.
 
-import { erc20Abi, type Address, type PublicClient } from "viem";
+import { erc20Abi, type Address, type Hex, type PublicClient } from "viem";
 import { escrowAbi } from "@chain/abi";
 
 export type LiveTerms = {
@@ -21,6 +21,13 @@ export type LiveTerms = {
 
 export interface EscrowReader {
   liveTerms(): Promise<LiveTerms>;
+  /**
+   * The chain's "safe" head: on the OP Stack (Base) every block up to it is derived from the
+   * canonical L1 chain, so it cannot be reorged away by the sequencer (OP specs, derivation.md).
+   */
+  safeHead(): Promise<{ number: bigint; timestamp: number }>;
+  /** Does the escrow hold a booking with this id (any state after deposit) at the given block? */
+  bookingExistsAt(bookingId: Hex, blockNumber: bigint): Promise<boolean>;
 }
 
 export function escrowReader(client: PublicClient, escrow: Address): EscrowReader {
@@ -54,6 +61,20 @@ export function escrowReader(client: PublicClient, escrow: Address): EscrowReade
         maxOpenPrincipalAtomic: cap,
         totalOpenPrincipal: open,
       };
+    },
+    async safeHead() {
+      const b = await client.getBlock({ blockTag: "safe" });
+      return { number: b.number, timestamp: Number(b.timestamp) };
+    },
+    async bookingExistsAt(bookingId, blockNumber) {
+      const b = (await client.readContract({
+        address: escrow,
+        abi: escrowAbi,
+        functionName: "getBooking",
+        args: [bookingId],
+        blockNumber,
+      })) as { state: number };
+      return Number(b.state) !== 0;
     },
   };
 }
