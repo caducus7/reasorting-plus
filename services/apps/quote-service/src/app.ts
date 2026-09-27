@@ -115,19 +115,22 @@ export function createApp(d: Deps): Hono {
   /**
    * Ends an awaiting-payment hold only on proof (docs/adr/0012 §3), like a Stripe Checkout Session
    * that ends on the provider's authoritative state rather than a local timer:
-   *  - handed over: the indexer projected the escrow booking into calendar_blocks;
+   *  - handed over: the deposit is at the safe head and the indexer projected it into calendar_blocks;
    *  - unpaid: the chain's safe head is past the quote's expiry (the escrow rejects an expired quote
    *    for good) and the booking does not exist at that block.
    * Otherwise the hold stays, however long the indexer or the chain takes.
    */
   async function resolveHold(h: AwaitingHold): Promise<"handed-over" | "unpaid" | "pending"> {
-    if (await d.calendar.hasEscrowBooking(h.resource_id, h.booking_id)) {
-      await releaseAwaitingHold(d.db, h);
-      return "handed-over";
-    }
     try {
       const head = await d.chain.safeHead();
-      if (head.timestamp > h.until && !(await d.chain.bookingExistsAt(h.booking_id as Hex, head.number))) {
+      const paid = await d.chain.bookingExistsAt(h.booking_id as Hex, head.number);
+      // Handed over only once the deposit is past reorg (safe head): if C6 projected it at the
+      // unsafe head and it were reorged away, the still-valid quote could be paid again.
+      if (paid && (await d.calendar.hasEscrowBooking(h.resource_id, h.booking_id))) {
+        await releaseAwaitingHold(d.db, h);
+        return "handed-over";
+      }
+      if (!paid && head.timestamp > h.until) {
         await releaseAwaitingHold(d.db, h);
         return "unpaid";
       }

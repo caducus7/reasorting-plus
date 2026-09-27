@@ -128,6 +128,21 @@ channel_feeds(resource_id text, feed_id text, last_success_at timestamptz, PRIMA
 - `stay` is `[checkInDate, checkOutDate)` in the property's local dates.
 - Any change to these tables is a shared-schema change (CLAUDE.md §7).
 
+**Required of C6 for escrow rows** (the project owner confirmed on 2026-09-27). This is how a quoted
+hold hands over (§3):
+- Write one row per escrow booking when `BookingDeposited` is indexed, at the unsafe head so it blocks
+  at once:
+  - `resource_id`: lowercase hex;
+  - `source = 'escrow'`;
+  - `ref`: the bookingId, lowercase `0x` hex;
+  - `stay`: the property-local `[checkIn, checkOut)` dates.
+- Remove the row on reorg rollback of the deposit, and when the booking ends by cancellation. A
+  completed or disputed stay may keep its row.
+- C5 hands a hold over only when the row exists **and** the deposit is in the safe head. A deposit
+  that is projected and then reorged away therefore never frees a slot whose quote could still be
+  paid.
+- There is no latency requirement. Until the row exists the hold stays.
+
 ## 8. Signer: AWS KMS by default
 
 - The key is `ECC_SECG_P256K1`.

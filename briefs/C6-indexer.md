@@ -48,6 +48,16 @@ iCal (C7), rebalancer (C8), the owner dashboard and digest UI (agent workstream)
 - Each invariant has a test that breaks it deliberately and sees the alert.
 - Read API latency under 100ms p95 locally.
 
+## Decided (from C5, ADR 0012 §3 and §7)
+
+- The calendar projection writes escrow bookings into the shared `calendar_blocks` table:
+  - one row per booking, written at the unsafe head;
+  - `source = 'escrow'`, `ref` = bookingId (lowercase `0x` hex), `resource_id` lowercase hex;
+  - `stay` = the property-local `[checkIn, checkOut)` dates;
+  - the row is removed on reorg rollback of the deposit and on cancellation.
+- The quote service releases a quoted slot's hold only when this row exists and the deposit is at the
+  safe head. There is no indexing-latency requirement.
+
 ## Watch for
 
 - The projection must never hold state replay can't reproduce. No manual fixes in the DB.

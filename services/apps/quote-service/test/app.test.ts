@@ -262,6 +262,22 @@ describe("prepare", () => {
     expect((await db.query("SELECT count(*)::int AS n FROM quotes")).rows[0].n).toBe(1);
   });
 
+  it("does not hand over to a calendar row whose deposit has not reached the safe head", async () => {
+    const id = (await offer()).body.offerId as string;
+    const r = v1.PrepareResponse.parse((await prepare(id)).body);
+    // C6 projected the deposit at the unsafe head; the safe head does not contain it yet.
+    await db.query("INSERT INTO calendar_blocks VALUES ($1, daterange('2026-06-10','2026-06-14'), 'escrow', $2)", [
+      VILLA.resourceId,
+      r.bookingId,
+    ]);
+    await offer("2026-06-20", "2026-06-22"); // touches nothing overlapping; resolution runs per slot
+    await call("/v1/availability?checkIn=2026-06-10&checkOut=2026-06-14&guests=2");
+    expect((await db.query("SELECT count(*)::int AS n FROM holds WHERE active AND awaiting_booking_id IS NOT NULL")).rows[0].n).toBe(1);
+    // A reorg removes the deposit and C6 deletes the row: the hold is still there.
+    await db.query("DELETE FROM calendar_blocks");
+    expect((await offer("2026-06-11", "2026-06-13")).status).toBe(409);
+  });
+
   it("an RPC outage leaves quoted holds in place without failing the endpoints", async () => {
     const id = (await offer()).body.offerId as string;
     v1.PrepareResponse.parse((await prepare(id)).body);
