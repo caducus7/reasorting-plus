@@ -6,7 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PublicClient } from "viem";
 import { createWorker, migrate, type Worker } from "../../src/worker/main.js";
 import type { Alert, Notifier } from "../../src/worker/notifier.js";
-import { book, freshDb, propertiesFile, startAnvil, startPonder, type Anvil, type Ponder } from "./harness.js";
+import { escrowAbi } from "@chain/abi";
+import { book, KEYS, freshDb, propertiesFile, startAnvil, startPonder, type Anvil, type Ponder } from "./harness.js";
 
 const GENESIS = Date.parse("2026-05-01T09:00:00Z") / 1000;
 const DAY = 86_400;
@@ -159,4 +160,23 @@ describe("reorg (brief C6 test 1)", () => {
     expect(open.filter((i) => i !== "DEEP_REORG")).toEqual([]);
     expect((await q("SELECT * FROM indexer_ops.alerts WHERE invariant = 'LAG' AND resolved_at IS NULL"))).toEqual([]);
   }, 300_000);
+
+  it("frees a cancelled booking's slot only once the cancellation is at safe", async () => {
+    const b = await book(a, { checkInUtc: (await a.now()) + 60 * DAY, nights: 2, priceAtomic: 300_000_000n });
+    await a.test.mine({ blocks: 2 });
+    await ponder.indexed(await a.client.getBlockNumber());
+    await worker.tick();
+    expect(await calendarRow(b.bookingId)).toHaveLength(1);
+
+    await a.send(KEYS.guest, { address: a.dep.escrow, abi: escrowAbi, functionName: "cancelByGuest", args: [b.bookingId] });
+    await ponder.indexed(await a.client.getBlockNumber());
+    await worker.tick();
+    expect((await bookingRow(b.bookingId))[0]!.outcome).toBe("CANCELLED_BY_GUEST");
+    expect(await calendarRow(b.bookingId)).toHaveLength(1); // a reorg could still undo the cancellation
+
+    await a.test.mine({ blocks: 33 }); // Anvil: safe = latest - 32
+    await ponder.indexed(await a.client.getBlockNumber());
+    await worker.tick();
+    expect(await calendarRow(b.bookingId)).toEqual([]);
+  }, 120_000);
 });

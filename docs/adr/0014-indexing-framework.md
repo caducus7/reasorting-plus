@@ -1,6 +1,8 @@
 # 0014: indexing framework (D6): Ponder
 
-**Status:** Accepted with C6's framework step. The project owner said to "go defaults" and to follow
+**Status:** Accepted with C6's framework step. Amended by [0017](0017-indexer-design.md) §4: an
+unrecoverable reorg stops indexing at once, but the process exits only after up to 10 minutes of
+retries, so a stall is detected from outside (lag monitor). The project owner said to "go defaults" and to follow
 established tooling over custom code (spec 10.1: "Do not hand-roll chain ingestion").
 
 **Evaluated:** Ponder 0.17.12 (`ponder-sh/ponder@6b0bd2c`) and Envio HyperIndex 3.12.1

@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "tsc -p tsconfig.json && vitest run",
-    "test:anvil": "vitest run -c vitest.anvil.config.ts"
+    "test:anvil": "vitest run -c vitest.anvil.config.ts",
+    "start": "ponder start --schema ${PONDER_LIVE_SCHEMA:-live_1} --views-schema ${PONDER_SCHEMA:-indexer}",
+    "worker": "node dist/worker/main.js",
+    "replay": "node dist/replay/nightly.js",
+    "codegen": "ponder codegen",
+    "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@chain/abi": "workspace:*",
