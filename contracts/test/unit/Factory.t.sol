@@ -192,6 +192,13 @@ contract FactoryTest is Test {
         vm.expectRevert(IEscrowFactory.VaultAssetMismatch.selector);
         factory.setDefaultVault(address(wrongAsset));
         MockVault v = new MockVault(IERC20(address(usdc)));
+        vm.expectRevert(IEscrowFactory.VaultNotSeeded.selector);
+        factory.setDefaultVault(address(v));
+        vm.stopPrank();
+        usdc.mint(address(this), 1);
+        usdc.approve(address(v), 1);
+        v.deposit(1, address(0xdEaD)); // seed (docs/adr/0013 §1)
+        vm.startPrank(admin);
         factory.setDefaultVault(address(v));
         assertEq(factory.defaultVault(), address(v));
         factory.setDefaultVault(address(0));

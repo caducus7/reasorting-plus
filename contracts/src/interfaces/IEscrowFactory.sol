@@ -34,6 +34,7 @@ interface IEscrowFactory {
     error FeeAboveMax();
     error NotApproved();
     error VaultAssetMismatch();
+    error VaultNotSeeded(); // docs/adr/0013 §1
 
     function MAX_FEE_BPS() external view returns (uint16);
     function FEE_CHANGE_DELAY() external view returns (uint32);

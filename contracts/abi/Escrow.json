@@ -1346,6 +1346,13 @@
   },
   {
     "type": "function",
+    "name": "recoverVault",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "redeem",
     "inputs": [
       {
@@ -1698,6 +1705,26 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "vaultWrittenOff",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "writeOffVault",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -2484,6 +2511,32 @@
   },
   {
     "type": "event",
+    "name": "VaultRecovered",
+    "inputs": [
+      {
+        "name": "by",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "VaultWrittenOff",
+    "inputs": [
+      {
+        "name": "by",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "YieldAccrued",
     "inputs": [
       {
@@ -2714,6 +2767,11 @@
   },
   {
     "type": "error",
+    "name": "NotOwnerOrGuardian",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotQuoteGuest",
     "inputs": []
   },
@@ -2771,6 +2829,11 @@
   },
   {
     "type": "error",
+    "name": "ReserveBelowFloor",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ReserveInsufficient",
     "inputs": []
   },
@@ -2812,7 +2875,22 @@
   },
   {
     "type": "error",
+    "name": "VaultIsWrittenOff",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "VaultMintedNoShares",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VaultNotSeeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VaultNotWrittenOff",
     "inputs": []
   },
   {

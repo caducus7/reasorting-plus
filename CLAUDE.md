@@ -90,7 +90,9 @@ without checking.
 3. No function takes a recipient address for escrowed funds. Recipients come from stored booking
    data or stored roles. The one exception is the vault's ERC-4626 `withdraw(assets, receiver,
    owner)`, which the escrow always calls with itself as `receiver` and `owner`; test that.
-4. `accrue()` is the first call in every state-changing escrow function.
+4. `accrue()` is the first call in every escrow function that moves funds or changes an accounting
+   parameter. Pure flags (`pauseDeposits`/`unpauseDeposits`) are exempt and make no external call;
+   `writeOffVault`/`recoverVault` set their flag first (ADR 0013).
 5. Every inflow and outflow updates `lastAssets` by the exact amount moved.
 6. Terms on a booking (price, cutoffs, `feeBps`, `guestYieldBps`, arbitrator) never change after
    deposit.
@@ -113,6 +115,8 @@ without checking.
 | Rebalancer does not redeem on a depeg | Redeeming during a depeg locks in the loss | 6.7 |
 | Utilisation is not a deployment gate | At ~90% Base utilisation it would idle funds permanently; liquidity is gated directly | 6.7 |
 | No upgrade path | Immutable clones; migration by draining | 2 |
+| Pause does not run `accrue()` | A broken vault must never stop the guardian pausing; Aave's pause does not sync indexes either | 6.1, ADR 0013 |
+| `deploy` needs a seeded vault and a 1 USDC owner reserve | Inflation-attack defence and first-loss dust buffer, per audited vault practice | 6.3, ADR 0013 |
 | `openDispute` is guest-only | Owners have nothing to claim without a damage deposit (D8) | 7 |
 
 If you believe one of these is actually wrong, write it up in your handoff under "Spec concerns".

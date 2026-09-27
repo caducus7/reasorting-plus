@@ -101,6 +101,7 @@ contract C9HandlerCoverage is Test {
         uint256 episodes = 30;
         for (uint256 e; e < episodes; e++) {
             C9Handler h = new C9Handler();
+            h.ownerFundReserve(1e6); // operator funds the reserve floor before deploying (ADR 0013 §5)
             uint256 r = uint256(keccak256(abi.encode("c9", e)));
             for (uint256 s; s < 120; s++) {
                 r = uint256(keccak256(abi.encode(r)));

@@ -14,6 +14,16 @@ contract C9Adversarial is C9Base {
 
     function setUp() public virtual {
         _deployAll();
+        _fundReserveFloor();
+    }
+
+    /// Operator step required before any deploy (docs/adr/0013 §5).
+    function _fundReserveFloor() internal {
+        usdc.mint(escOwner, 1e6);
+        vm.startPrank(escOwner);
+        usdc.approve(escAddr, 1e6);
+        esc.fundReserve(1e6);
+        vm.stopPrank();
     }
 
     // ------------------------------------------------------------------ helpers
@@ -478,7 +488,8 @@ contract C9Adversarial is C9Base {
         // absorption order: reserve, owner credits, then lossDebt
         assertEq(escV.reserve(), 0);
         assertEq(escV.ownerClaimable(), 0);
-        assertEq(escV.lossDebt(), s.loss - 100e6 - 950e6, "remainder booked as lossDebt");
+        // reserve = 100 funded here + the 1 USDC floor funded in setUp (docs/adr/0013 §5)
+        assertEq(escV.lossDebt(), s.loss - 101e6 - 950e6, "remainder booked as lossDebt");
         assertEq(escV.feeClaimable(feeR1), 50e6, "fee credits never absorb a loss");
         assertEq(escV.lastAssets(), _assetsOf(escAddr), "baseline lowered to assets");
     }
@@ -731,9 +742,10 @@ contract C9Adversarial is C9Base {
         assertEq(usdc.receivedFromEscrow(rebalancer), 0);
     }
 
-    /// ERC-4626 rounding: an honest deploy into a live vault whose share price is not 1 leaves
-    /// assets a few units below principal. INV-1 as written (spec 10.4) has no band for this.
-    function test_INV1_asWritten_breaksOnHonestDeployRounding_spec10_4() public {
+    /// ERC-4626 rounding: an honest deploy into a live vault whose share price is not 1 leaves the
+    /// position a few units below cost. Finding F4; since docs/adr/0013 §4-5 the owner-funded
+    /// reserve floor covers it, so INV-1 as written in spec 10.4 holds.
+    function test_INV1_asWritten_holdsAfterHonestDeployRounding_ADR0013() public {
         usdc.mint(address(vault), 370_000e6 + 3); // share price ~1.37 before the escrow enters
         Quote memory a = _std(0, 10_000e6 + 1);
         _dep(a);
@@ -746,31 +758,46 @@ contract C9Adversarial is C9Base {
     // ------------------------------------------------------------------ liveness with a broken vault (property 11)
 
     /// Property 11: settle (credit-only, moves no tokens) should stay callable. With the vault's
-    /// views reverting, accrue() cannot price the position.
-    function test_settleWithBrokenVault_property11() public {
+    /// views reverting, accrue() cannot price the position (finding F3). Since docs/adr/0013 §3 the
+    /// owner or guardian writes the vault off and settlement proceeds.
+    function test_settleWithBrokenVault_afterWriteOff_property11_ADR0013() public {
         Quote memory a = _std(0, 10_000e6);
         bytes32 id = _dep(a);
         vm.prank(rebalancer);
         esc.deploy(5_000e6);
         vault.setBricked(true);
         vm.warp(uint256(a.checkOutUtc) + GRACE);
+        vm.expectRevert(); // still blocked until a privileged write-off (documented, ADR 0013 §3)
+        esc.settle(id);
+        vm.prank(guardian);
+        esc.writeOffVault();
         esc.settle(id);
         assertEq(uint8(esc.bookingState(id)), uint8(BookingState.SETTLED));
     }
 }
 
-/// @notice The empty-vault variant: the vault has no third-party LP (a freshly deployed ERC-4626).
+/// @notice The empty-vault variant (finding F2). Since docs/adr/0013 §1 the factory only accepts a
+/// seeded vault and deploy re-checks the seed, so this uses the base's third-party LP seed and then
+/// has that LP leave, which empties the vault again.
 contract C9AdversarialEmptyVault is C9Base {
-    function _seedVault() internal override {}
-
     function setUp() public {
         _deployAll();
+        usdc.mint(escOwner, 1e6);
+        vm.startPrank(escOwner);
+        usdc.approve(escAddr, 1e6);
+        esc.fundReserve(1e6);
+        vm.stopPrank();
     }
 
-    /// Property 10 / ADR 0008 inflation risk: an attacker donates to the empty vault, then a routine
-    /// deploy mints very few shares and the escrow's position is worth less than it put in. The loss
-    /// is booked against the owner (after the window) though no one's entitlement should move.
-    function test_P10_deployIntoDonatedEmptyVault_losesValue_ADR0008() public {
+    /// Property 10 / ADR 0008 inflation risk: an attacker donates to the emptied vault, then a
+    /// routine deploy would mint very few shares. Deploy now refuses the unseeded vault and the
+    /// escrow loses nothing.
+    function test_P10_deployIntoDonatedEmptyVault_refused_ADR0013() public {
+        address lp = makeAddr("c9.vaultLp");
+        vm.startPrank(lp);
+        vault.redeem(vault.balanceOf(lp), lp, lp);
+        vm.stopPrank();
+        assertEq(vault.totalSupply(), 0, "vault emptied");
         Quote memory a;
         a.resourceId = keccak256("villa-crete");
         a.checkInUtc = uint40(block.timestamp + 30 days);
@@ -789,10 +816,10 @@ contract C9AdversarialEmptyVault is C9Base {
         vm.stopPrank();
         vm.prank(attacker);
         usdc.transfer(address(vault), 1_000e6); // first-depositor donation
+        uint256 before = _assetsOf(escAddr);
         vm.prank(rebalancer);
+        vm.expectRevert(IEscrowErrors.VaultNotSeeded.selector);
         esc.deploy(1_999e6);
-        uint256 lost = escV.lastAssets() - _assetsOf(escAddr);
-        emit log_named_uint("escrow value lost on one deploy (atomic)", lost);
-        assertEq(lost, 0, "deploy destroyed escrow value (rebalancer + donation)");
+        assertEq(_assetsOf(escAddr), before, "no escrow value moved");
     }
 }

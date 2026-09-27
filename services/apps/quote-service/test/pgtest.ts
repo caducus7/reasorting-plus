@@ -20,11 +20,30 @@ export async function freshDb(): Promise<{ db: Db; url: string; drop: () => Prom
     db,
     url,
     drop: async () => {
+      // pg-pool's end() resolves once its client list is empty, before the sockets have closed, so
+      // backends can outlive it briefly. DROP ... WITH (FORCE) would kill them and the closing client
+      // raises an uncaught 57P01. A plain DROP refuses (55006) while any connection remains, so retry
+      // it until they are gone; FORCE only as a last resort.
       await db.end();
       const a = new pg.Client({ connectionString: TEST_PG_URL });
       await a.connect();
-      await a.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-      await a.end();
+      try {
+        for (let i = 0; ; i++) {
+          try {
+            await a.query(`DROP DATABASE IF EXISTS ${name}`);
+            return;
+          } catch (e) {
+            if ((e as { code?: string }).code !== "55006") throw e;
+            if (i >= 50) {
+              await a.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+              return;
+            }
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        }
+      } finally {
+        await a.end();
+      }
     },
   };
 }

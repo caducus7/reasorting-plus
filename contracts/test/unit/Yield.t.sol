@@ -237,14 +237,29 @@ contract YieldTest is YieldTestBase {
         _loss(6_000 * USDC);
         escrow.observeShortfall();
         vm.warp(block.timestamp + 6 hours);
-        vm.expectEmit(address(escrow));
-        emit LossRecognised(6_000 * USDC, 100 * USDC, 5_320 * USDC, 580 * USDC);
+        vm.recordLogs();
         escrow.recogniseLoss();
+        (uint256 loss, uint256 fromReserve, uint256 fromOwner, uint256 toDebt) = _lossFromLogs();
+        // The seed and virtual shares (offset 12, ADR 0013 §1) carry a few atomic units of the loss.
+        assertApproxEqAbs(loss, 6_000 * USDC, VAULT_ROUNDING);
+        assertEq(fromReserve, 100 * USDC);
+        assertEq(fromOwner, 5_320 * USDC);
+        assertEq(toDebt, loss - 100 * USDC - 5_320 * USDC);
         assertEq(escrow.reserve(), 0);
         assertEq(escrow.ownerClaimable(), 0);
-        assertEq(escrow.lossDebt(), 580 * USDC);
+        assertEq(escrow.lossDebt(), toDebt);
         assertEq(escrow.guestClaimable(guest), 0, "no guest credit is touched");
         _assertBooksBalance();
+    }
+
+    function _lossFromLogs() internal returns (uint256, uint256, uint256, uint256) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == IEscrowEvents.LossRecognised.selector) {
+                return abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+            }
+        }
+        revert("no LossRecognised");
     }
 
     // ================================================================== lossDebt (spec 6.4)
@@ -258,8 +273,8 @@ contract YieldTest is YieldTestBase {
         _loss(1_000 * USDC);
         escrow.observeShortfall();
         vm.warp(block.timestamp + 6 hours);
-        escrow.recogniseLoss(); // nothing to absorb: all to debt
-        assertApproxEqAbs(escrow.lossDebt(), 1_000 * USDC, VAULT_ROUNDING);
+        escrow.recogniseLoss(); // the 1 USDC reserve floor absorbs first (ADR 0013 §5), the rest to debt
+        assertApproxEqAbs(escrow.lossDebt(), 999 * USDC, VAULT_ROUNDING);
     }
 
     function test_whileDebt_depositsOwnerFeeAndDeployRevert() public {
@@ -286,7 +301,8 @@ contract YieldTest is YieldTestBase {
         vm.prank(guest);
         uint256 paid = escrow.claim();
         assertGt(paid, idle, "pulled from the vault beyond idle");
-        assertApproxEqAbs(paid, 4_640 * USDC, VAULT_ROUNDING, "all that is left: 5,640 - 1,000");
+        // 5,640 + the 1 USDC reserve floor that absorbed the first of the loss (ADR 0013 §5) - 1,000
+        assertApproxEqAbs(paid, 4_641 * USDC, VAULT_ROUNDING, "all that is left");
         assertEq(escrow.guestClaimable(guest), P - paid, "rest stays claimable");
         _assertBooksBalance();
     }
@@ -396,10 +412,15 @@ contract YieldTest is YieldTestBase {
         vm.startPrank(rebalancer);
         vm.expectRevert(ZeroAmount.selector);
         escrow.deploy(0);
+        vm.expectRevert(ReserveBelowFloor.selector); // ADR 0013 §5
+        escrow.deploy(1);
+        vm.stopPrank();
+        _fundReserveFloor(); // idle 5,601
+        vm.startPrank(rebalancer);
         vm.expectRevert(BufferBreached.selector);
-        escrow.deploy(5_040 * USDC + 1); // idle would drop below 560
+        escrow.deploy(5_041 * USDC + 1); // idle would drop below 560
         vm.expectRevert(BufferBreached.selector);
-        escrow.deploy(P + 1); // more than idle
+        escrow.deploy(P + 1 * USDC + 1); // more than idle
         vm.stopPrank();
 
         vm.prank(owner);
@@ -445,6 +466,7 @@ contract YieldTest is YieldTestBase {
 
     function test_deploy_revertsIfVaultMintsNoShares() public {
         ZeroShareVault zv = new ZeroShareVault(IERC20(address(usdc)));
+        zv.seed(address(0xdEaD), 1e6); // seeded (ADR 0013 §1), but mints nothing for a deposit
         vm.prank(admin);
         factory.setDefaultVault(address(zv));
         vm.prank(admin);
@@ -454,10 +476,11 @@ contract YieldTest is YieldTestBase {
         vm.prank(owner);
         escrow.setRebalancer(rebalancer);
         _deposit(_q(guest, P));
+        _fundReserveFloor();
         vm.prank(rebalancer);
         vm.expectRevert(VaultMintedNoShares.selector);
         escrow.deploy(1_000 * USDC);
-        assertEq(usdc.balanceOf(address(escrow)), P, "nothing left the escrow");
+        assertEq(usdc.balanceOf(address(escrow)), P + 1 * USDC, "nothing left the escrow");
     }
 
     function test_rebalancerUnset_cannotDeploy() public {
@@ -580,17 +603,22 @@ contract YieldTest is YieldTestBase {
         vm.prank(owner);
         escrow.proposeReserveWithdrawal(1_000 * USDC, 1);
         vm.prank(guardian);
-        escrow.confirmReserveWithdrawal(1_000 * USDC, 1); // paid from idle
-        _fundReserve(1_000 * USDC); // idle back to 1,560
+        vm.expectRevert(ReserveBelowFloor.selector); // a booking is open: keep 1 USDC (ADR 0013 §5)
+        escrow.confirmReserveWithdrawal(1_000 * USDC, 1);
+        vm.prank(owner);
+        escrow.proposeReserveWithdrawal(999 * USDC, 1);
+        vm.prank(guardian);
+        escrow.confirmReserveWithdrawal(999 * USDC, 1); // paid from idle
+        _fundReserve(999 * USDC); // idle back to 1,560
         vm.prank(guest);
         escrow.cancelByGuest(id);
         vm.prank(guest);
         assertEq(escrow.claim(), 1_560 * USDC, "guest drains idle; vault illiquid");
         vm.prank(owner);
-        escrow.proposeReserveWithdrawal(1_000 * USDC, 1);
+        escrow.proposeReserveWithdrawal(999 * USDC, 1);
         vm.prank(guardian);
         vm.expectRevert(ReserveInsufficient.selector);
-        escrow.confirmReserveWithdrawal(1_000 * USDC, 1);
+        escrow.confirmReserveWithdrawal(999 * USDC, 1);
         _assertBooksBalance();
     }
 }

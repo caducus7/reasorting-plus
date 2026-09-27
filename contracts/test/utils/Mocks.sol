@@ -42,11 +42,16 @@ contract FeeOnTransferToken is ERC20 {
     }
 }
 
-/// @notice OpenZeppelin ERC-4626 vault with a settable withdrawal limit (liquidity crunch) and a
-/// record of the last withdrawal receiver.
+/// @notice OpenZeppelin ERC-4626 vault with a settable withdrawal limit (liquidity crunch), a
+/// record of the last withdrawal receiver, and a switch that makes its asset views revert (a broken
+/// adapter, docs/adr/0013 §3). Decimals offset 12 = 18 - 6, MetaMorpho's value for USDC: with any
+/// seed the inflation attack is orders of magnitude unprofitable (OpenZeppelin ERC4626 CAUTION).
 contract MockVault is ERC4626 {
     uint256 public withdrawLimit = type(uint256).max;
     address public lastReceiver;
+    bool public broken;
+
+    error VaultBroken();
 
     constructor(IERC20 asset_) ERC20("Mock Vault", "mvUSDC") ERC4626(asset_) {}
 
@@ -54,7 +59,26 @@ contract MockVault is ERC4626 {
         withdrawLimit = limit;
     }
 
+    function setBroken(bool b) external {
+        broken = b;
+    }
+
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 12;
+    }
+
+    function totalAssets() public view override returns (uint256) {
+        if (broken) revert VaultBroken();
+        return super.totalAssets();
+    }
+
+    function previewRedeem(uint256 shares) public view override returns (uint256) {
+        if (broken) revert VaultBroken();
+        return super.previewRedeem(shares);
+    }
+
     function maxWithdraw(address owner) public view override returns (uint256) {
+        if (broken) revert VaultBroken();
         return Math.min(super.maxWithdraw(owner), withdrawLimit);
     }
 
@@ -71,6 +95,11 @@ contract MockVault is ERC4626 {
 /// at a high share price.
 contract ZeroShareVault is ERC4626 {
     constructor(IERC20 asset_) ERC20("Zero", "ZERO") ERC4626(asset_) {}
+
+    /// Test-only: shares for a seed position (this vault never mints shares for a deposit).
+    function seed(address to, uint256 shares) external {
+        _mint(to, shares);
+    }
 
     function _convertToShares(uint256, Math.Rounding) internal pure override returns (uint256) {
         return 0;

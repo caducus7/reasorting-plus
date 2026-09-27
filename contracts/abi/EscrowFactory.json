@@ -699,6 +699,11 @@
   },
   {
     "type": "error",
+    "name": "VaultNotSeeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ZeroAddress",
     "inputs": []
   }

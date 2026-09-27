@@ -27,6 +27,7 @@ contract C9IndependentInvariants is StdInvariant, Test {
         usdc = C9Usdc(h.tokenAddr());
         vault = C9Vault(h.vaultAddr());
 
+        h.ownerFundReserve(1e6); // operator funds the reserve floor before deploying (ADR 0013 §5)
         targetContract(address(h));
         bytes4[] memory s = new bytes4[](35);
         s[0] = C9Handler.guestDeposit.selector;

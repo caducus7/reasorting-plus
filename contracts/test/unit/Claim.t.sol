@@ -142,6 +142,9 @@ contract ClaimTest is EscrowTestBase {
 
     function _escrowWithVault() internal returns (MockVault v) {
         v = new MockVault(IERC20(address(usdc)));
+        usdc.mint(address(this), 1);
+        usdc.approve(address(v), 1);
+        v.deposit(1, address(0xdEaD)); // seed (docs/adr/0013 §1)
         vm.prank(admin);
         factory.setDefaultVault(address(v));
         vm.prank(admin);

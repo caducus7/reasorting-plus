@@ -294,6 +294,15 @@ contract YieldHandler is Test {
         if (idle <= buffer || cap <= deployed) return;
         uint256 room = idle - buffer < cap - deployed ? idle - buffer : cap - deployed;
         amount = bound(amount, 1, room);
+        uint256 r = escrow.reserve();
+        if (r < 1e6) {
+            // The operator funds the reserve floor before deploying (docs/adr/0013 §5).
+            usdc.mint(owner, 1e6 - r);
+            vm.startPrank(owner);
+            usdc.approve(address(escrow), 1e6 - r);
+            escrow.fundReserve(1e6 - r);
+            vm.stopPrank();
+        }
         vm.prank(rebalancer);
         try escrow.deploy(amount) {
             nDeployed++;

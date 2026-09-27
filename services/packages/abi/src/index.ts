@@ -1348,6 +1348,13 @@ export const escrowAbi = [
   },
   {
     "type": "function",
+    "name": "recoverVault",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "redeem",
     "inputs": [
       {
@@ -1700,6 +1707,26 @@ export const escrowAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "vaultWrittenOff",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "writeOffVault",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -2486,6 +2513,32 @@ export const escrowAbi = [
   },
   {
     "type": "event",
+    "name": "VaultRecovered",
+    "inputs": [
+      {
+        "name": "by",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "VaultWrittenOff",
+    "inputs": [
+      {
+        "name": "by",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "YieldAccrued",
     "inputs": [
       {
@@ -2716,6 +2769,11 @@ export const escrowAbi = [
   },
   {
     "type": "error",
+    "name": "NotOwnerOrGuardian",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotQuoteGuest",
     "inputs": []
   },
@@ -2773,6 +2831,11 @@ export const escrowAbi = [
   },
   {
     "type": "error",
+    "name": "ReserveBelowFloor",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ReserveInsufficient",
     "inputs": []
   },
@@ -2814,7 +2877,22 @@ export const escrowAbi = [
   },
   {
     "type": "error",
+    "name": "VaultIsWrittenOff",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "VaultMintedNoShares",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VaultNotSeeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VaultNotWrittenOff",
     "inputs": []
   },
   {
@@ -3531,6 +3609,11 @@ export const escrowFactoryAbi = [
   {
     "type": "error",
     "name": "VaultAssetMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VaultNotSeeded",
     "inputs": []
   },
   {

@@ -272,6 +272,11 @@ library LedgerLib {
         if (assets == 0) revert IEscrowErrors.ZeroAmount();
         if (l.lossDebt != 0) revert IEscrowErrors.LossDebtOutstanding();
         if (l.shortfallSince != 0) revert IEscrowErrors.ShortfallPending();
+        // Inflation-attack defence is the vault's seed (docs/adr/0013 §1); re-checked here because a
+        // seed that is not burned can be withdrawn after the factory accepted the vault.
+        if (vault.totalSupply() < Params.MIN_VAULT_SUPPLY) revert IEscrowErrors.VaultNotSeeded();
+        // First-loss floor for rounding dust, owner-funded (docs/adr/0013 §5).
+        if (l.reserve < Params.RESERVE_FLOOR) revert IEscrowErrors.ReserveBelowFloor();
         uint256 liabilities = l.totalOpenPrincipal + l.totalDisputed + l.totalPendingYield + l.totalClaimable;
         uint256 idle = usdc.balanceOf(address(this));
         if (assets > idle || idle - assets < Math.mulDiv(liabilities, Params.MIN_BUFFER_BPS, Params.BPS)) {
@@ -324,14 +329,16 @@ library LedgerLib {
     // ------------------------------------------------------------------------------------------
     // Reserve (spec 6.5)
 
-    /// @notice Pays a confirmed reserve withdrawal to `payout`. Blocked while a loss is active.
+    /// @notice Pays a confirmed reserve withdrawal to `payout`. Blocked while a loss is active, and
+    /// below RESERVE_FLOOR while anyone else is owed and a vault is configured (docs/adr/0013 §5).
     function withdrawReserve(
         Ledger storage l,
         IERC20 usdc,
         IERC4626 vault,
         uint256 amount,
         uint8 reasonCode,
-        address payout
+        address payout,
+        bool hasVault
     ) external {
         if (amount == 0 || amount != l.pendingReserveWithdrawal || reasonCode != l.pendingReserveReason) {
             revert IEscrowErrors.ReserveProposalMismatch();
@@ -339,6 +346,10 @@ library LedgerLib {
         if (l.lossDebt != 0) revert IEscrowErrors.LossDebtOutstanding();
         if (l.shortfallSince != 0) revert IEscrowErrors.ShortfallPending();
         if (amount > l.reserve) revert IEscrowErrors.ReserveInsufficient();
+        if (
+            hasVault && l.reserve - amount < Params.RESERVE_FLOOR
+                && l.totalOpenPrincipal + l.totalDisputed + l.totalPendingYield + l.totalClaimable != 0
+        ) revert IEscrowErrors.ReserveBelowFloor();
         (uint256 pull, uint256 available) = planPull(usdc, vault, amount);
         if (available < amount) revert IEscrowErrors.ReserveInsufficient();
 

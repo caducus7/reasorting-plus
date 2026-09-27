@@ -1003,22 +1003,21 @@ contract C9Handler is C9Base {
         b.frozenTotal = onChain; // documented ambiguity: the ghost adopts whichever the escrow chose
     }
 
+    /// Amended by docs/adr/0013 §2 (C9 finding F1): pause and unpause are pure flags. They must not
+    /// run accrue() (so a broken vault cannot stop the guardian) and must leave the books untouched.
     function guardianPause(bool pause, bool asAttacker) external {
         address caller = asAttacker ? attacker : guardian;
         uint8 pred = (caller != guardian || pause == gPaused) ? MUST_REVERT : MUST_OK;
-        Ledger memory saved = L;
         uint256 laBefore = escV.lastAssets();
         uint40 sinceBefore = escV.shortfallSince();
-        _accrue(_assets());
         bytes memory data = pause ? abi.encodeCall(IEscrow.pauseDeposits, ()) : abi.encodeCall(IEscrow.unpauseDeposits, ());
         (bool ok, bytes memory ret,) = _call(caller, data);
         _judge(K_AUTH, pause ? "pauseDeposits" : "unpauseDeposits", pred, ok, ret);
-        if (!ok) {
-            L = saved;
-            return;
-        }
+        if (!ok) return;
         gPaused = pause;
-        _detectSkippedAccrue(saved, laBefore, sinceBefore, pause ? "pauseDeposits" : "unpauseDeposits");
+        if (escV.lastAssets() != laBefore || escV.shortfallSince() != sinceBefore) {
+            _flag(K_RULE4, pause ? "pauseDeposits changed the books" : "unpauseDeposits changed the books");
+        }
     }
 
     /// Spec 6.1 / CLAUDE.md rule 4: accrue() is the first line of every state-changing function. If the
@@ -1131,6 +1130,7 @@ contract C9Handler is C9Base {
         _accrue(a);
         uint8 pred = MUST_OK;
         if (caller != guardian || !gResSet || mismatch || _gate(a) || amount > L.reserve) pred = MUST_REVERT;
+        else if (L.reserve - amount < MIN_LOSS && _liabilities() != 0) pred = MUST_REVERT; // ADR 0013 §5
         else if (amount > usdc.balanceOf(escAddr) + vault.maxWithdraw(escAddr)) pred = MUST_REVERT;
         (bool ok, bytes memory ret,) =
             _call(caller, abi.encodeCall(IEscrow.confirmReserveWithdrawal, (amount, gResReason)));
@@ -1243,6 +1243,8 @@ contract C9Handler is C9Base {
 
     function _predictDeploy(address caller, uint256 amount, uint256 idle, bool gate) internal view returns (uint8) {
         if (caller != rebalancer || amount == 0 || amount > idle || gate) return MUST_REVERT;
+        // docs/adr/0013 §1 and §5: the vault must be seeded and the owner-funded reserve floor held.
+        if (vault.totalSupply() < 1e6 || L.reserve < MIN_LOSS) return MUST_REVERT;
         uint256 lb = _liabilities();
         uint256 dep = vault.previewRedeem(vault.balanceOf(escAddr));
         if (idle - amount < lb * MIN_BUFFER_BPS / 10_000) return MUST_REVERT;

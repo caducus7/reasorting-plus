@@ -432,7 +432,8 @@ uint256 lastAssets;           // idle + adapter.totalAssets() after last accrual
 ```
 
 ```
-accrue():                          // first line of every state-changing function
+accrue():                          // first line of every function that moves funds or changes an
+                                   // accounting parameter; pure flags (pause) are exempt (ADR 0013)
     assets = idle + adapter.totalAssets()
     delta  = assets - lastAssets   // signed
     if delta > 0:
@@ -464,6 +465,9 @@ function redeem(uint256 amount) external onlyRebalancer;
 // liabilities = totalOpenPrincipal + totalDisputed + totalPendingYield + totalClaimable
 // deploy reverts unless, after the move:
 //   lossDebt == 0
+//   vault.totalSupply() >= MIN_VAULT_SUPPLY           // seeded vault, re-checked (ADR 0013 §1)
+//   reserve >= RESERVE_FLOOR                           // owner-funded 1 USDC floor (ADR 0013 §5)
+//   the vault is not written off (ADR 0013 §3)
 //   idle >= liabilities * MIN_BUFFER_BPS / 10_000      // default 1_000
 //   deployed <= liabilities * maxDeployBps / 10_000    // owner-set, default 9_000
 ```
@@ -490,6 +494,11 @@ While `lossDebt > 0`:
 - bookings still settle and guest principal claims proceed, first from idle, then from the adapter
 - the owner clears the debt with `topUpLoss(amount)`
 
+**Broken vault (ADR 0013 §3).** If the vault's views revert, every accrue-first function reverts.
+The owner or guardian calls `writeOffVault()`: accounting stops reading the vault, the position
+shows as an observed shortfall and is recognised through the order above after the window.
+`recoverVault()` reads it again; recovered value repays `lossDebt` first, then is yield.
+
 **Guest claims are paid first. That is a priority rule, not a guarantee.** If a loss exceeds what
 the escrow and adapter hold and the owner never tops up, the last guests to claim are short. For the
 pilot, the owner is the project owner and will cover it. Before a second owner is onboarded,
@@ -500,7 +509,10 @@ claim below the policy-derived figure.
 
 ### 6.5 Reserve
 
-Optional and owner-funded via `fundReserve(amount)`. It also receives gains that accrue while
+Owner-funded via `fundReserve(amount)`; required up to `RESERVE_FLOOR` (1 USDC) before any
+`deploy`, and a withdrawal may not take it below the floor while a vault is configured and anyone else
+is owed. Sub-threshold rounding dust therefore falls on the reserve, not the last claimant (ADR 0013
+§5). It also receives gains that accrue while
 `totalOpenPrincipal == 0`. Spending is limited to loss absorption. Withdrawal requires both owner and
 guardian, pays the current `payoutAddress`, is blocked while `lossDebt > 0` or a shortfall is
 observed, and emits `ReserveWithdrawn(amount, reasonCode)` (ADR 0009).
@@ -508,13 +520,15 @@ observed, and emits `ReserveWithdrawn(amount, reasonCode)` (ADR 0009).
 ### 6.6 Adapters
 
 **The adapter is an ERC-4626 vault over USDC (ADR 0008).** The escrow holds vault shares; the
-factory rejects a vault whose `asset()` is not USDC. Withdrawals are bounded by
+factory rejects a vault whose `asset()` is not USDC, or with fewer than `MIN_VAULT_SUPPLY` shares
+outstanding. Approve only rate-priced vaults (Aave StataTokenV2) or OpenZeppelin ERC-4626 vaults with
+`_decimalsOffset() >= 6` and a burned seed (ADR 0013 §1). Withdrawals are bounded by
 `maxWithdraw(escrow)` and always use the escrow as both `receiver` and `owner`. Assets are
 `previewRedeem(balanceOf(escrow))`.
 
 - **No vault** (`address(0)`): funds stay idle. Replaces NullAdapter.
-- **Mock vault** (OpenZeppelin `ERC4626` with a yield and loss injector): settable rate and
-  withdrawal limit. Testnet and all
+- **Mock vault** (OpenZeppelin `ERC4626` with a yield and loss injector, decimals offset 12, seeded
+  to `0xdEaD` at deploy): settable rate and withdrawal limit. Testnet and all
   demos run on this: months of accrual in minutes, and a liquidity crunch on demand. Aave testnet
   rates are meaningless; do not demo on them.
 - **Aave:** tested only on a Base mainnet fork. Prototype Aave's own ERC-4626 wrapper
@@ -665,7 +679,8 @@ schema and diffs it against production; any difference is a failure.
 
 ```
 INV-1  solvency (hard)
-       idle + adapter.totalAssets() >= totalOpenPrincipal + totalDisputed + totalClaimable
+       idle + adapter.totalAssets() + lossDebt >= totalOpenPrincipal + totalDisputed + totalClaimable
+       page when the gap is >= MIN_LOSS_ATOMIC (ERC-4626 rounding is below it; ADR 0013 §4)
 
 INV-2  solvency (full)
        idle + adapter.totalAssets() + lossDebt
@@ -839,4 +854,5 @@ for yield; nothing in booking depends on them, because NullAdapter works from da
 | [0010](adr/0010-c2-accounting-structure.md) | 6.1 to 6.5: Ledger struct and linked libraries, pending-yield release, 1 USDC loss threshold, owner deferred yield absorbs losses |
 | [0011](adr/0011-disputes.md) | 7: reason enum, frozen time extends the dispute deadline, `DisputeOpened` figures |
 | [0009](adr/0009-loss-window-and-remaining-defaults.md) | 6.1, 6.4, 6.5, 4.5: high-water-mark baseline, shortfall gating, reserve recipient; bookingId keying off-chain |
+| [0013](adr/0013-vault-safety-c9-findings.md) | 6.1, 6.3 to 6.6, 10.4: seeded vaults only, pause is a pure flag, privileged vault write-off/recovery, INV-1 band, owner-funded reserve floor |
 | [0012](adr/0012-quote-service-policies.md) | 5.1 to 5.3: DST materialisation rules, holds and one live quote per offer, 900 s feed staleness, fee-straddle cap, 409 on offers (docs only), guest JWT claims (agent-workstream sign-off pending), shared calendar tables |

@@ -175,6 +175,11 @@ interface IEscrowEvents {
     event LossToppedUp(uint256 amount, uint256 lossDebt);
     event ReserveFunded(uint256 amount);
     event ReserveWithdrawn(uint256 amount, uint8 reasonCode);
+    /// @dev Accounting stops reading the vault; the position shows up as a shortfall and is then
+    /// recognised through the normal loss path (docs/adr/0013 §3).
+    event VaultWrittenOff(address indexed by);
+    /// @dev Accounting reads the vault again; recovered value is booked as a gain (docs/adr/0013 §3).
+    event VaultRecovered(address indexed by);
 
     // --- configuration (C1) ---
     event FeeChangeProposed(uint16 feeBps, uint64 effectiveAt);
@@ -239,6 +244,11 @@ interface IEscrowErrors {
     error ReserveProposalMismatch();
     error ZeroAmount();
     error VaultMintedNoShares();
+    error VaultNotSeeded(); // docs/adr/0013 §1
+    error ReserveBelowFloor(); // docs/adr/0013 §5
+    error VaultIsWrittenOff(); // docs/adr/0013 §3
+    error VaultNotWrittenOff();
+    error NotOwnerOrGuardian();
 
     // disputes (C3)
     error NotDelivered();
@@ -294,6 +304,8 @@ interface IEscrow is IEscrowEvents, IEscrowErrors {
     function fundReserve(uint256 amount) external; // owner
     function proposeReserveWithdrawal(uint256 amount, uint8 reasonCode) external; // owner
     function confirmReserveWithdrawal(uint256 amount, uint8 reasonCode) external; // guardian
+    function writeOffVault() external; // owner or guardian (docs/adr/0013 §3)
+    function recoverVault() external; // owner or guardian
 
     // --- disputes (C3) ---
     function openDispute(bytes32 bookingId, uint256 contestedAtomic, bytes32 evidenceHash) external; // guest

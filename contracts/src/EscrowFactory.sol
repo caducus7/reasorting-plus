@@ -162,7 +162,11 @@ contract EscrowFactory is IEscrowFactory, Ownable2Step {
     }
 
     function _setDefaultVault(address a) private {
-        if (a != address(0) && IERC4626(a).asset() != usdc) revert VaultAssetMismatch();
+        if (a != address(0)) {
+            if (IERC4626(a).asset() != usdc) revert VaultAssetMismatch();
+            // The deployer's initial deposit (docs/adr/0013 §1); deploy re-checks it.
+            if (IERC4626(a).totalSupply() < Params.MIN_VAULT_SUPPLY) revert VaultNotSeeded();
+        }
         defaultVault = a;
         emit DefaultVaultSet(a);
     }

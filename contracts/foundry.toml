@@ -11,6 +11,9 @@ optimizer_runs = 200
 via_ir = false            # avoids the via-IR-only bugs listed for 0.8.35
 bytecode_hash = "none"
 cbor_metadata = true
+# Test-only EVM gas cap per test. The C9 path-coverage driver runs 30 fresh escrows x 120 actions in
+# one test and exceeds the 2^30 default; this does not affect deployments.
+gas_limit = 4294967296
 fs_permissions = [{ access = "read", path = "./" }, { access = "read-write", path = "./deployments" }]
 remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",

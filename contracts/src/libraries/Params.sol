@@ -21,6 +21,14 @@ library Params {
     /// @dev Shortfalls below this are ignored for gating and recognition, so ERC-4626 rounding dust
     /// cannot block owners or be recognised to grief deposits (docs/adr/0010).
     uint256 internal constant MIN_LOSS_ATOMIC = 1e6; // 1 USDC
+    /// @dev A vault must have at least this many shares outstanding before the factory accepts it
+    /// and before every deploy: the "initial deposit" defence against the ERC-4626 inflation attack
+    /// (OpenZeppelin ERC4626 CAUTION; Morpho Vault V2 adapters). 1e6 shares is 1 USDC at offset 0,
+    /// and any seed at offset >= 6. Our own shares count: an attacker's donation then accrues to us.
+    uint256 internal constant MIN_VAULT_SUPPLY = 1e6;
+    /// @dev Owner-funded first-loss floor that must stay in the reserve while funds are exposed to
+    /// a vault, so sub-threshold dust never falls on the last claimant (docs/adr/0013 §5).
+    uint256 internal constant RESERVE_FLOOR = MIN_LOSS_ATOMIC;
 
     // owner-set defaults at creation
     uint16 internal constant DEFAULT_GUEST_YIELD_BPS = 5_000;

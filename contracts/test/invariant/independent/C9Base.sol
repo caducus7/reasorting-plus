@@ -128,6 +128,7 @@ abstract contract C9Base is Test {
 
         usdc = new C9Usdc();
         vault = new C9Vault(usdc);
+        _seedVault(); // before the factory accepts the vault (docs/adr/0013 §1)
         impl = new Escrow();
         factory = new EscrowFactory(admin, address(usdc), address(impl), feeR1, guardian, arbA1, address(vault));
 
@@ -140,7 +141,6 @@ abstract contract C9Base is Test {
         vm.prank(escOwner);
         esc.setRebalancer(rebalancer);
 
-        _seedVault();
         usdc.watch(escAddr, address(vault));
         for (uint256 i; i < 4; i++) {
             usdc.setAllowedFromEscrow(guests[i], true);

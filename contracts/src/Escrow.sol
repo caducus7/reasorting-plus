@@ -94,10 +94,20 @@ contract Escrow is
     mapping(bytes32 => Cutoff[]) internal _cutoffs;
     mapping(bytes32 => Dispute) internal _disputes; // C3
 
+    /// @notice True after writeOffVault: accounting stops reading the vault (docs/adr/0013 §3).
+    bool public vaultWrittenOff;
+
     // ------------------------------------------------------------------------------------------
 
     modifier onlyGuardian() {
         if (msg.sender != factory.guardian()) revert NotGuardian();
+        _;
+    }
+
+    /// Either party may act on a broken vault; the owner absorbs a write-off first (spec 6.4), and
+    /// the platform may act for guests (docs/adr/0013 §3).
+    modifier onlyOwnerOrGuardian() {
+        if (msg.sender != owner() && msg.sender != factory.guardian()) revert NotOwnerOrGuardian();
         _;
     }
 
@@ -346,7 +356,7 @@ contract Escrow is
     function claim() external nonReentrant returns (uint256 paid) {
         _accrue();
         _promoteTimelocks();
-        paid = LedgerLib.claim(_l, usdc, vault, msg.sender, msg.sender == payoutAddress);
+        paid = LedgerLib.claim(_l, usdc, _activeVault(), msg.sender, msg.sender == payoutAddress);
     }
 
     // ==========================================================================================
@@ -494,7 +504,12 @@ contract Escrow is
 
     /// @dev Spec 6.1 with the high-water-mark baseline (docs/adr/0009); see LedgerLib.accrue.
     function _accrue() internal {
-        LedgerLib.accrue(_l, usdc, vault);
+        LedgerLib.accrue(_l, usdc, _activeVault());
+    }
+
+    /// @dev The vault accounting reads: none once written off (docs/adr/0013 §3).
+    function _activeVault() internal view returns (IERC4626) {
+        return vaultWrittenOff ? IERC4626(address(0)) : vault;
     }
 
     // ==========================================================================================
@@ -507,6 +522,7 @@ contract Escrow is
 
     /// @inheritdoc IEscrow
     function deploy(uint256 assets) external onlyRebalancer nonReentrant {
+        if (vaultWrittenOff) revert VaultIsWrittenOff();
         _accrue();
         LedgerLib.deploy(_l, usdc, vault, assets, maxDeployBps);
     }
@@ -514,6 +530,7 @@ contract Escrow is
     /// @inheritdoc IEscrow
     /// @dev Allowed during a loss: the rebalancer may always move funds back to idle (spec 6.4).
     function redeem(uint256 assets) external onlyRebalancer nonReentrant {
+        if (vaultWrittenOff) revert VaultIsWrittenOff();
         _accrue();
         if (address(vault) == address(0)) revert NoVault();
         if (assets == 0) revert ZeroAmount();
@@ -531,7 +548,31 @@ contract Escrow is
     /// @inheritdoc IEscrow
     function recogniseLoss() external nonReentrant {
         _accrue();
-        LedgerLib.recogniseLoss(_l, usdc, vault);
+        LedgerLib.recogniseLoss(_l, usdc, _activeVault());
+    }
+
+    /// @inheritdoc IEscrow
+    /// @dev Yearn V3 `force_revoke_strategy` / Morpho Vault V2 `removeAdapter` pattern. The flag is
+    /// set before accrue() because accrue() cannot read a broken vault (a documented exception to
+    /// money rule 4). The position then shows as an observed shortfall: guests are paid first from
+    /// idle, and after LOSS_CONFIRMATION_WINDOW it is recognised reserve -> owner -> lossDebt.
+    function writeOffVault() external onlyOwnerOrGuardian nonReentrant {
+        if (address(vault) == address(0)) revert NoVault();
+        if (vaultWrittenOff) revert VaultIsWrittenOff();
+        vaultWrittenOff = true;
+        emit VaultWrittenOff(msg.sender);
+        _accrue();
+    }
+
+    /// @inheritdoc IEscrow
+    /// @dev Accounting reads the vault again (reverts if it is still broken). Recovered value is a
+    /// gain: it repays lossDebt first, then is distributed as yield (Yearn: "the loss will be
+    /// credited as profit").
+    function recoverVault() external onlyOwnerOrGuardian nonReentrant {
+        if (!vaultWrittenOff) revert VaultNotWrittenOff();
+        vaultWrittenOff = false;
+        emit VaultRecovered(msg.sender);
+        _accrue();
     }
 
     /// @inheritdoc IEscrow
@@ -574,7 +615,9 @@ contract Escrow is
     /// Pays the current payout address; blocked while a loss is active (docs/adr/0009).
     function confirmReserveWithdrawal(uint256 amount, uint8 reasonCode) external onlyGuardian nonReentrant {
         _accrue();
-        LedgerLib.withdrawReserve(_l, usdc, vault, amount, reasonCode, payoutAddress);
+        LedgerLib.withdrawReserve(
+            _l, usdc, _activeVault(), amount, reasonCode, payoutAddress, address(vault) != address(0)
+        );
     }
 
     /// @dev Pulls exactly `amount` from the caller and checks the balance delta (deposit guard 12).
@@ -633,7 +676,7 @@ contract Escrow is
     }
 
     function totalAssets() public view returns (uint256) {
-        return LedgerLib.totalAssets(usdc, vault);
+        return LedgerLib.totalAssets(usdc, _activeVault());
     }
 
     /// @notice Assets below the booked baseline, not yet recognised as a loss.
