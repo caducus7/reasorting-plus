@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "declaration": false, "types": ["node"] },
+  "compilerOptions": { "rootDir": "src", "outDir": "dist", "declaration": true, "types": ["node"] },
   "include": ["src/core", "src/worker", "src/replay"]
 }

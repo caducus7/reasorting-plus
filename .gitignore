@@ -15,3 +15,6 @@ coverage/
 
 # Local agent worktrees (tooling, never committed)
 .claude/worktrees/
+
+# C7 channel feed URLs carry channel tokens (CLAUDE.md §9)
+services/apps/ical-sync/feeds.json

@@ -1,0 +1,4 @@
+[
+  { "feedId": "airbnb-villa", "resourceId": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "channel": "airbnb", "url": "https://www.airbnb.com/calendar/ical/<listing>.ics?s=<token>" },
+  { "feedId": "booking-villa", "resourceId": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "channel": "booking", "url": "https://ical.booking.com/v1/export?t=<token>" }
+]

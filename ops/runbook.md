@@ -57,3 +57,35 @@ their common block.
 - **Different:** it opens a `REPLAY` page and keeps the schema.
 
 Never edit projection tables by hand. The fix is always a replay.
+
+## Channel sync (C7)
+
+Design: [ADR 0018](../docs/adr/0018-ical-channel-sync.md). Service: `services/apps/ical-sync`
+(`pnpm build && pnpm start`). It runs against the indexer's database.
+
+### Adding a channel to a property
+
+1. In the channel's calendar-sync settings, copy its **export** iCal URL. Menu names vary by
+   channel and change over time; look for "sync calendars" or "export calendar".
+2. Add an entry to `FEEDS_FILE`:
+   `{ "feedId": "<channel>-<property>", "resourceId": "0x…", "channel": "<channel>", "url": "<that URL>" }`.
+   The file is secret; never commit it.
+3. Restart ical-sync. It prints this property's **export** URL for the channel, one line per
+   `export <channel> <resourceId>`.
+4. Paste that export URL into the channel's **import** calendar setting.
+5. Until the first import succeeds, prepare fails closed for the property. That is expected.
+
+Removing an entry and restarting deletes that feed's blocks.
+
+### Alerts
+
+| Alert | First step |
+|---|---|
+| `FEED_STALE` | Check the feed URL still works (channels rotate them), check `ical_sync.feed_state.last_error`. Prepare is failing closed for that property meanwhile. |
+| `INV-3` overlap | The owner decides which booking to honour (spec 9 conflict runbook). If ours goes, `cancelByProperty`. Every conflict is in `ical_sync.conflicts`. |
+| `CALENDAR` (from C6) | The property has no time zone in `PROPERTIES_FILE`. |
+
+### Rotating export URLs
+
+Change `EXPORT_TOKEN_SECRET` and restart, then paste the newly printed URLs into each channel. The
+old URLs stop working at once.

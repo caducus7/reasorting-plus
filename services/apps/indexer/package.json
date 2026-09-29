@@ -28,5 +28,27 @@
     "@types/pg": "^8.23.1",
     "typescript": "~5.9.3",
     "vitest": "^3.2.7"
+  },
+  "exports": {
+    "./alerts": {
+      "types": "./dist/worker/notifier.d.ts",
+      "default": "./dist/worker/notifier.js"
+    },
+    "./invariants": {
+      "types": "./dist/core/invariants.d.ts",
+      "default": "./dist/core/invariants.js"
+    },
+    "./calendar": {
+      "types": "./dist/worker/calendar.d.ts",
+      "default": "./dist/worker/calendar.js"
+    },
+    "./projection": {
+      "types": "./dist/worker/projection.d.ts",
+      "default": "./dist/worker/projection.js"
+    },
+    "./ops": {
+      "types": "./dist/worker/main.d.ts",
+      "default": "./dist/worker/main.js"
+    }
   }
 }

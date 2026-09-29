@@ -52,4 +52,18 @@ export class AlertOutbox {
     for (const a of opened) for (const n of this.adapters) await n.notify(a).catch((e) => console.error("notifier failed", e));
     return opened;
   }
+
+  /** Opens `breaches` without resolving anything else (for producers that see only part of a family). */
+  async open(breaches: Breach[]) {
+    return this.sync("\u0000none", breaches, { autoResolve: false });
+  }
+
+  /** Resolves exactly these keys (for producers that know a specific condition has cleared). */
+  async resolve(keys: string[]) {
+    if (keys.length === 0) return;
+    await this.db.query(
+      "UPDATE indexer_ops.alerts SET resolved_at = now() WHERE resolved_at IS NULL AND chain_id = $1 AND dedupe_key = ANY($2::text[])",
+      [this.chainId, keys],
+    );
+  }
 }
