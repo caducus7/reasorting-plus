@@ -17,6 +17,8 @@ import { runScenario } from "./scenario.js";
 import { chainReadModel, indexerReadModel } from "../../../quote-service/src/readModel.js";
 
 const GENESIS = Date.parse("2026-06-01T09:00:00Z") / 1000;
+const TOKEN = "k".repeat(48); // review 0005 R6: the read API needs it
+const auth = { authorization: `Bearer ${TOKEN}` };
 const STATES = ["NONE", "ESCROWED", "DELIVERED", "FROZEN", "DISPUTED", "SETTLED"];
 
 let a: Anvil;
@@ -31,7 +33,7 @@ beforeAll(async () => {
   db = await freshDb();
   a = await startAnvil(GENESIS);
   await migrate(db.pool);
-  ponder = await startPonder({ dbUrl: db.url, rpcUrl: a.url, factory: a.dep.factory, schema: "live", viewsSchema: "indexer" });
+  ponder = await startPonder({ dbUrl: db.url, rpcUrl: a.url, factory: a.dep.factory, schema: "live", viewsSchema: "indexer", env: { INDEXER_API_TOKEN: TOKEN } });
   worker = createWorker(
     { DATABASE_URL: db.url, RPC_URL: a.url, CHAIN_ID: 31337, PONDER_SCHEMA: "indexer", PROPERTIES_FILE: propertiesFile(), POLL_MS: 200, MONITOR_EVERY_MS: 1_000, RECEIVED_CONFIRMATIONS: 2, MAX_LAG_BLOCKS: 60 },
     db.pool,
@@ -52,7 +54,7 @@ afterAll(async () => {
 const read = <T>(fn: string, args: unknown[] = []) =>
   a.client.readContract({ address: a.dep.escrow, abi: escrowAbi, functionName: fn as never, args: args as never }) as Promise<T>;
 const get = async (path: string) => {
-  const r = await fetch(`${ponder.base}${path}`);
+  const r = await fetch(`${ponder.base}${path}`, { headers: auth });
   return { status: r.status, body: (await r.json()) as Record<string, unknown> };
 };
 
@@ -101,7 +103,8 @@ describe("C6 acceptance on Anvil", () => {
   });
 
   it("C5's indexer read model returns the same BookingView as its chain read model, for every booking", async () => {
-    const viaIndexer = indexerReadModel(ponder.base, a.dep.escrow);
+    expect((await fetch(`${ponder.base}/v1/indexer/escrows/${a.dep.escrow}/summary`)).status).toBe(401); // R6
+    const viaIndexer = indexerReadModel(ponder.base, a.dep.escrow, { token: TOKEN });
     const viaChain = chainReadModel(a.client as PublicClient, a.dep.escrow, 0n);
     for (const b of scenario.all) {
       const [i, c] = [await viaIndexer.getBooking(b.bookingId), await viaChain.getBooking(b.bookingId)];
@@ -116,7 +119,7 @@ describe("C6 acceptance on Anvil", () => {
     const ms: number[] = [];
     for (let i = 0; i < 1_000; i++) {
       const t = performance.now();
-      const r = await fetch(`${ponder.base}${paths[i % paths.length]}`);
+      const r = await fetch(`${ponder.base}${paths[i % paths.length]}`, { headers: auth });
       await r.arrayBuffer();
       ms.push(performance.now() - t);
     }

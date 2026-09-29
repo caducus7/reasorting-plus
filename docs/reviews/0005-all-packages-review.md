@@ -8,7 +8,7 @@
 
 **Method:** adversarial reading against the spec, the ADRs and CLAUDE.md. Every finding below has a
 failing reproduction, or cites the code line if the failure is by inspection. Fixes follow the prior
-art each row names. **Status: findings only; no fix applied yet.**
+art each row names. **Status: all eight fixed** (owner decision: "all eight"); see the disposition at the end.
 
 ## Findings
 
@@ -57,3 +57,23 @@ the C8 liquidity exit during a depeg, and the USDC/USD deviation threshold (conf
 | R6 | Require a bearer token (`INDEXER_API_TOKEN`, constant-time compared) on `/v1/indexer/*`; C5 sends it. Deployment note: bind the port to the private network. | Defence in depth: network isolation plus authentication (OWASP ASVS V4). Ponder's own docs leave auth to the app's Hono middleware. |
 | R7 | On a 404 from the indexer, C5 falls back to the chain read model for that request. | Graceful degradation with a read-through fallback. |
 | R8 | Keep 7 days of `head_events` (consumers read NOTIFY live; the table is only for catch-up). | Outbox pattern: events are pruned once consumed or past a retention window. |
+
+## Disposition
+
+All eight fixed, each with its reproduction test, which now passes.
+
+| # | Fix | Test |
+|---|---|---|
+| R1 | "One in flight" is per signer (\`sender_busy\`), plus a per-signer process lock | \`rebalancer/test/review/shared-key.test.ts\`: distinct nonces; B logs \`sender_busy\` |
+| R2 | Per-escrow evaluation; \`READ_FAILED\` page; an unreadable escrow's open alerts are kept (\`keepEscrows\`); INV-3 isolated | \`indexer/test/review/monitors-dark.test.ts\` |
+| R3 | A failed read writes \`hold\` \`read_failed\` with the error and pages; resolved on recovery. Alerting holds also go to the outbox | \`rebalancer/test/review/read-failure.test.ts\` |
+| R4 | Conflicts re-evaluated for every configured resource on every cycle | \`ical-sync/test/review/conflict-on-304.test.ts\` |
+| R5 | URLs are not logged; \`pnpm export-urls\` prints them on demand | same file (regression guard plus CLI test) |
+| R6 | Bearer token on \`/v1/indexer/*\`, fail closed without one (except Anvil), C5 sends it; bind Ponder to a private host (runbook) | \`indexer/test/review/auth.test.ts\`; the Anvil acceptance run checks 401 without the token and passes with it |
+| R7 | \`withFallback(indexer, chain)\` in C5 | \`quote-service/test/readModel.test.ts\` |
+| R8 | 7-day retention on \`head_events\`, pruned hourly | \`indexer/test/review/retention.test.ts\` |
+
+**Regression after the fixes:**
+- \`pnpm -r test\`: shared 32, signer 3, api-stub 49, indexer 70, quote-service 78, ical-sync 25,
+  rebalancer 37.
+- Anvil: quote-service 5, indexer 10, ical-sync 3, rebalancer 4.

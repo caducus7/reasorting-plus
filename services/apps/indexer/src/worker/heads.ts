@@ -58,3 +58,9 @@ export async function recordHeads(pool: pg.Pool, client: PublicClient, chainId: 
   }
   return breaches;
 }
+
+/** Outbox retention (review 0005 R8): consumers read NOTIFY live; the table is for catch-up only. */
+export async function pruneHeadEvents(pool: pg.Pool, retentionDays: number): Promise<number> {
+  const r = await pool.query("DELETE FROM indexer_ops.head_events WHERE created_at < now() - make_interval(days => $1)", [retentionDays]);
+  return r.rowCount ?? 0;
+}

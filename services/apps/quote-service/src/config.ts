@@ -22,6 +22,8 @@ export const Env = z
     PROPERTIES_FILE: z.string().min(1),
     /** C6 indexer read API (docs/adr/0017 §8). Unset: read bookings directly from the chain. */
     INDEXER_URL: z.url().optional(),
+    /** Bearer token for the indexer read API (review 0005 R6); from the secret store. */
+    INDEXER_API_TOKEN: z.string().min(32).optional(),
     SIGNER: z.enum(["kms", "local"]).default("kms"),
     KMS_KEY_ID: z.string().optional(),
     AWS_REGION: z.string().optional(),

@@ -126,16 +126,18 @@ export function createSync(d: SyncDeps) {
     } finally {
       c.release();
     }
-    await checkConflicts(f.resourceId);
   }
 
-  /** Polls every feed whose next attempt is due. */
+  /** Polls every feed whose next attempt is due, then checks every configured resource for
+   * conflicts. Level-triggered (review 0005 R4): a new escrow booking can overlap a channel block
+   * whose feed has not changed (304), so conflicts are re-evaluated every cycle, not only on import. */
   async function pollDue() {
     const due = (await d.pool.query("SELECT feed_id, failures, etag, last_modified FROM ical_sync.feed_state WHERE next_attempt_at <= $1", [now()])).rows;
     for (const row of due) {
       const f = d.feeds.find((x) => x.feedId === row.feed_id);
       if (f) await pollOne(f, row);
     }
+    for (const r of new Set(d.feeds.map((f) => lc(f.resourceId)))) await checkConflicts(r);
   }
 
   /** INV-3 overlaps for one resource: log, alert once per conflict, resolve what cleared. */

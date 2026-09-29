@@ -9,6 +9,7 @@
 //   - dry run: decide and log only.
 // Every cycle writes a decision row with the full snapshot and the checks behind it.
 import type pg from "pg";
+import type { AlertOutbox } from "@chain/indexer/alerts";
 import { decide, DEFAULTS, type Config, type Decision, type Snapshot } from "./policy.js";
 
 export type TxKind = "deploy" | "redeem" | "cancel";
@@ -38,6 +39,8 @@ export type ExecutorDeps = {
   cooldownSec?: number; // first cooldown after a revert (default 600 s), doubling
   maxCooldownSec?: number; // cap (default 6 h)
   policy?: Config;
+  /** C6's alert outbox: read failures and alerting holds page instead of failing silently. */
+  alerts?: AlertOutbox;
 };
 
 const json = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x));
@@ -141,8 +144,28 @@ export function createExecutor(d: ExecutorDeps) {
     const pending = (await d.pool.query("SELECT * FROM rebalancer.pending_tx WHERE chain_id = $1 AND escrow = $2", [c.chainId, esc])).rows[0];
     if (pending) return handlePending(pending);
 
-    const s = await c.snapshot();
+    let s: Awaited<ReturnType<ChainPort["snapshot"]>>;
+    try {
+      s = await c.snapshot();
+    } catch (e) {
+      // A reverting read (e.g. a broken vault, ADR 0013 §3) must be visible in the log and page,
+      // never a silent gap (review 0005 R3).
+      const msg = (e as Error).message.slice(0, 300);
+      await log({}, "hold", "read_failed", "logged", { detail: msg });
+      await d.alerts?.open([
+        { invariant: "REBALANCER", severity: "page", key: `REBALANCER:read_failed:${esc}`, escrow: esc, message: `rebalancer cannot read escrow ${esc}: ${msg}`, response: ["check_vault", "write_off_vault"] },
+      ]);
+      return;
+    }
+    await d.alerts?.resolve([`REBALANCER:read_failed:${esc}`]);
     const dec = decide(s.snapshot, d.policy ?? DEFAULTS);
+    const alertKey = `REBALANCER:hold:${esc}`;
+    if (dec.kind === "hold" && dec.alert) {
+      await d.alerts?.open([{ invariant: "REBALANCER", severity: "alert", key: `${alertKey}:${dec.reason}`, escrow: esc, message: `rebalancer holding on ${esc}: ${dec.reason}`, response: ["check_rebalancer_log"] }]);
+    } else {
+      const open = await d.pool.query("SELECT dedupe_key FROM indexer_ops.alerts WHERE resolved_at IS NULL AND dedupe_key LIKE $1", [`${alertKey}:%`]).catch(() => ({ rows: [] as { dedupe_key: string }[] }));
+      await d.alerts?.resolve(open.rows.map((r) => r.dedupe_key));
+    }
     await d.pool.query(
       `INSERT INTO rebalancer.required_liquid (chain_id, escrow, block, required, computed_at) VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (chain_id, escrow) DO UPDATE SET block = EXCLUDED.block, required = EXCLUDED.required, computed_at = EXCLUDED.computed_at`,
@@ -152,6 +175,16 @@ export function createExecutor(d: ExecutorDeps) {
     if (dec.kind === "hold") return void (await log(ctx, "hold", dec.reason, "logged"));
     if (s.rebalancer.toLowerCase() !== c.sender.toLowerCase()) {
       return void (await log(ctx, dec.kind, dec.reason, "not_rebalancer", { amount: dec.amount, detail: `escrow rebalancer is ${s.rebalancer}` }));
+    }
+    // A nonce is one sequence per signer (viem's nonceManager keys on address + chainId; Defender
+    // relayers serialise per relayer): while another escrow's transaction from this key is in flight,
+    // wait, or the two would be signed at the same nonce (review 0005 R1).
+    const busy = await d.pool.query(
+      "SELECT escrow, nonce FROM rebalancer.pending_tx WHERE chain_id = $1 AND sender = $2 AND escrow <> $3 LIMIT 1",
+      [c.chainId, c.sender.toLowerCase(), esc],
+    );
+    if (busy.rowCount) {
+      return void (await log(ctx, dec.kind, dec.reason, "sender_busy", { amount: dec.amount, detail: `nonce ${busy.rows[0].nonce} in flight for ${busy.rows[0].escrow}` }));
     }
     const key = `${dec.kind}:${dec.reason}`;
     if (await coolingDown(key)) return void (await log(ctx, dec.kind, dec.reason, "cooldown", { amount: dec.amount }));

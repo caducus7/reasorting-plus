@@ -6,6 +6,7 @@ import { awsKmsClient, kmsAccount, localAccount } from "@chain/signer";
 import { Env } from "./config.js";
 import { migrate } from "./db.js";
 import { createExecutor } from "./executor.js";
+import { AlertOutbox, LogNotifier } from "@chain/indexer/alerts";
 import { projectionSource, viemChain } from "./chain.js";
 import { aaveLiquidity, mockVaultLiquidity } from "./liquidity.js";
 import { chainlinkPrice, fixedPrice } from "./price.js";
@@ -23,6 +24,10 @@ async function main() {
       : await chainlinkPrice(client, { feed: env.PRICE_FEED!, sequencerFeed: env.SEQUENCER_FEED });
   const projection = projectionSource(pool, env.PONDER_SCHEMA);
 
+  // One process per signer: a nonce sequence belongs to the key, not to an escrow (review 0005 R1).
+  const signerLock = await pool.connect();
+  const own = (await signerLock.query("SELECT pg_try_advisory_lock(hashtext('c8.rebalancer.signer:' || $1)) AS ok", [account.address.toLowerCase()])).rows[0].ok;
+  if (!own) throw new Error(`another rebalancer process uses signer ${account.address}`);
   const loops = [];
   for (const escrow of env.ESCROWS) {
     // One writer per escrow: a second rebalancer on the same escrow would fight over nonces.
@@ -39,7 +44,8 @@ async function main() {
       liquidity: (vault) => (env.LIQUIDITY_SOURCE === "aave" ? aaveLiquidity(client, env.AAVE_POOL!, usdc) : mockVaultLiquidity(client, vault)),
       projection,
     });
-    loops.push(createExecutor({ pool, chain, dryRun: env.DRY_RUN, stuckAfterSec: env.STUCK_AFTER_SEC, policy: env.policy }));
+    const alerts = new AlertOutbox(pool, env.CHAIN_ID, [new LogNotifier()]);
+    loops.push(createExecutor({ pool, chain, dryRun: env.DRY_RUN, stuckAfterSec: env.STUCK_AFTER_SEC, policy: env.policy, alerts }));
     console.log(`rebalancer ${account.address} for ${escrow}: ${env.DRY_RUN ? "DRY RUN" : "LIVE"}`);
   }
   for (;;) {

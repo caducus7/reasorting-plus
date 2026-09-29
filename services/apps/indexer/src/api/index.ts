@@ -6,12 +6,24 @@ import { and, eq, lte, sql } from "ponder";
 import { db, publicClients } from "ponder:api";
 import { balance, booking, escrow, journal } from "ponder:schema";
 import { getAddress, isAddress, isHex } from "viem";
+import { authorize } from "../core/auth.js";
 import { bookingView, bucketsOf, escrowSummary, json } from "../core/views.js";
 import { naturalDelta } from "../core/accounts.js";
 import type { BookingRow, BookingStatus, EscrowRow, Outcome } from "../core/types.js";
 
 const app = new Hono();
 const client = publicClients.chain;
+
+// Authentication (review 0005 R6): a bearer token on every read route, constant-time compared. The
+// API serves guest addresses, stays and escrow ledgers; its only client is the quote service. With
+// no token configured it fails closed, except on Anvil. Ponder's own /status and /metrics cannot take
+// this middleware: bind the server to a private interface (`ponder start -H <private ip>`, runbook).
+app.use("/v1/indexer/*", async (c, next) => {
+  const status = authorize(c.req.header("authorization"), process.env.INDEXER_API_TOKEN ?? "", process.env.CHAIN_ID);
+  if (status === 503) return c.json({ error: "not_configured" }, 503);
+  if (status === 401) return c.json({ error: "unauthorized" }, 401);
+  return next();
+});
 
 // Chain time for derived state (DELIVERED, refund tier). One read per second at most.
 let clock: { at: number; ts: bigint; number: bigint } | null = null;

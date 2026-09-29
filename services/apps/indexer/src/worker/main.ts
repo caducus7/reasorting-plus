@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import pg from "pg";
 import { createPublicClient, http, type PublicClient } from "viem";
 import { Env, loadZones } from "./config.js";
-import { readHeads, recordHeads } from "./heads.js";
+import { pruneHeadEvents, readHeads, recordHeads } from "./heads.js";
 import { updateMilestones } from "./milestones.js";
 import { syncCalendar } from "./calendar.js";
 import { runMonitors } from "./monitors.js";
@@ -22,6 +22,7 @@ export type Worker = { tick: (opts?: { monitors?: boolean }) => Promise<void>; o
 export function createWorker(env: Env, pool: pg.Pool, client: PublicClient, adapters: Notifier[]): Worker {
   const zones = loadZones(env.PROPERTIES_FILE);
   const outbox = new AlertOutbox(pool, env.CHAIN_ID, adapters);
+  let lastPrune = 0;
   return {
     outbox,
     async tick(opts = {}) {
@@ -35,6 +36,10 @@ export function createWorker(env: Env, pool: pg.Pool, client: PublicClient, adap
       const cal = await syncCalendar(pool, env.CHAIN_ID, snap, heads, zones);
       await outbox.sync("CALENDAR", cal.breaches);
       if (opts.monitors) await runMonitors(pool, client, snap, zones, outbox);
+      if (Date.now() - lastPrune > 3_600_000) {
+        await pruneHeadEvents(pool, 7);
+        lastPrune = Date.now();
+      }
     },
   };
 }

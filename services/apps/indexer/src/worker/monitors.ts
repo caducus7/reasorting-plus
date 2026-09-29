@@ -20,6 +20,7 @@ import {
 import type { AlertOutbox } from "./notifier.js";
 import type { Snapshot } from "./projection.js";
 import { localStay } from "./calendar.js";
+import { RESPONSE } from "../core/invariants.js";
 
 const FIELD_FNS = [
   "totalOpenPrincipal", "totalDisputed", "totalPendingYield", "totalClaimable", "reserve", "lossDebt",
@@ -61,25 +62,51 @@ export async function runMonitors(
   await sync("INV-4", snap.escrows.map(inv4).filter((b): b is Breach => b !== null));
 
   if (snap.block === 0n) return all;
+  // Each escrow is evaluated on its own (OpenZeppelin Monitor / Forta practice): one escrow whose
+  // reads revert (a broken vault, ADR 0013 §3) must not blind the others, and the failure itself
+  // pages, because every accrue-first function of that escrow is then reverting (review 0005 R2).
   const ts = (await client.getBlock({ blockNumber: snap.block })).timestamp;
   const inv: Record<string, Breach[]> = { "INV-1": [], "INV-2": [], "INV-5": [], RECONCILE: [] };
+  const failed: Breach[] = [];
   for (const e of snap.escrows) {
-    const c = await chainFields(client, e.id, snap.block);
-    const p = projectedFields(snap.balances.get(e.id.toLowerCase()) ?? new Map(), e);
-    const bookings = snap.bookings.filter((b) => b.escrow.toLowerCase() === e.id.toLowerCase());
-    for (const [k, b] of [
-      ["INV-1", inv1(e.id, c)],
-      ["INV-2", inv2(e.id, c)],
-      ["INV-5", inv5(e.id, c.idle, requiredLiquid(c, bookings, ts))],
-      ["RECONCILE", reconcile(e.id, snap.block, p, c)],
-    ] as const) if (b) inv[k]!.push(b);
+    try {
+      const c = await chainFields(client, e.id, snap.block);
+      const p = projectedFields(snap.balances.get(e.id.toLowerCase()) ?? new Map(), e);
+      const bookings = snap.bookings.filter((b) => b.escrow.toLowerCase() === e.id.toLowerCase());
+      for (const [k, b] of [
+        ["INV-1", inv1(e.id, c)],
+        ["INV-2", inv2(e.id, c)],
+        ["INV-5", inv5(e.id, c.idle, requiredLiquid(c, bookings, ts))],
+        ["RECONCILE", reconcile(e.id, snap.block, p, c)],
+      ] as const) if (b) inv[k]!.push(b);
+    } catch (err) {
+      failed.push({
+        invariant: "READ_FAILED",
+        severity: "page",
+        key: `READ_FAILED:${e.id.toLowerCase()}`,
+        escrow: e.id,
+        message: `escrow ${e.id} views revert at block ${snap.block}: ${(err as Error).message.slice(0, 200)}`,
+        response: RESPONSE.READ_FAILED!,
+      });
+    }
   }
-  for (const [k, list] of Object.entries(inv)) await sync(k, list);
+  const keepEscrows = failed.map((f) => f.escrow!);
+  for (const [k, list] of Object.entries(inv)) {
+    all.push(...list);
+    await outbox.sync(k, list, { keepEscrows });
+  }
+  await sync("READ_FAILED", failed);
 
   // INV-3: escrowed bookings whose stay has not ended, against the calendar (ours and channels').
   const escrowed = snap.bookings
     .filter((b) => b.status === "ESCROWED" && b.checkOutUtc > ts)
     .map((b) => ({ escrow: b.escrow, bookingId: b.bookingId.toLowerCase(), resourceId: b.resourceId.toLowerCase(), ...localStay(b, zones.get(b.resourceId.toLowerCase()) ?? "UTC") }));
-  await sync("INV-3", inv3(escrowed, await calendarRows(pool)));
+  try {
+    await sync("INV-3", inv3(escrowed, await calendarRows(pool)));
+  } catch (err) {
+    await sync("READ_FAILED:calendar", [{ invariant: "READ_FAILED", severity: "page", key: "READ_FAILED:calendar:inv3", message: `INV-3 could not be evaluated: ${(err as Error).message.slice(0, 200)}`, response: ["check_indexer"] }]);
+    return all;
+  }
+  await outbox.sync("READ_FAILED:calendar", []);
   return all;
 }

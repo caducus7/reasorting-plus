@@ -31,7 +31,7 @@ export class AlertOutbox {
     private readonly adapters: Notifier[],
   ) {}
 
-  async sync(family: string, breaches: Breach[], opts: { autoResolve?: boolean } = {}) {
+  async sync(family: string, breaches: Breach[], opts: { autoResolve?: boolean; keepEscrows?: string[] } = {}) {
     const opened: Alert[] = [];
     for (const b of breaches) {
       const r = await this.db.query(
@@ -45,8 +45,10 @@ export class AlertOutbox {
     if (opts.autoResolve !== false) {
       await this.db.query(
         `UPDATE indexer_ops.alerts SET resolved_at = now()
-         WHERE resolved_at IS NULL AND chain_id = $1 AND dedupe_key LIKE $2 AND NOT (dedupe_key = ANY($3::text[]))`,
-        [this.chainId, `${family}:%`, breaches.map((b) => b.key)],
+         WHERE resolved_at IS NULL AND chain_id = $1 AND dedupe_key LIKE $2 AND NOT (dedupe_key = ANY($3::text[]))
+           AND NOT (lower(coalesce(escrow, '')) = ANY($4::text[]))`,
+        // An escrow that could not be read keeps its open alerts: unknown is not cleared.
+        [this.chainId, `${family}:%`, breaches.map((b) => b.key), (opts.keepEscrows ?? []).map((e) => e.toLowerCase())],
       );
     }
     for (const a of opened) for (const n of this.adapters) await n.notify(a).catch((e) => console.error("notifier failed", e));

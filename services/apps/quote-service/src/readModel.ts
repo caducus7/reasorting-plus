@@ -141,7 +141,7 @@ const IndexerBooking = z.object({
 export function indexerReadModel(
   baseUrl: string,
   escrow: Address,
-  opts: { timeoutMs?: number; fetch?: typeof fetch } = {},
+  opts: { timeoutMs?: number; fetch?: typeof fetch; token?: string } = {},
 ): BookingReadModel {
   const f = opts.fetch ?? fetch;
   const base = baseUrl.replace(/\/+$/, "");
@@ -149,6 +149,7 @@ export function indexerReadModel(
     async getBooking(bookingId) {
       const r = await f(`${base}/v1/indexer/bookings/${escrow}/${bookingId}`, {
         signal: AbortSignal.timeout(opts.timeoutMs ?? 2_000),
+        headers: opts.token ? { authorization: `Bearer ${opts.token}` } : {},
       });
       if (r.status === 404) return null;
       if (!r.ok) throw new Error(`indexer read API ${r.status}`);
@@ -156,6 +157,23 @@ export function indexerReadModel(
       if (b.bookingId !== bookingId.toLowerCase()) throw new Error("indexer returned a different booking");
       const { bookingId: _id, ...view } = b;
       return view;
+    },
+  };
+}
+
+/** Indexer first, chain as a read-through fallback (review 0005 R7): a booking newer than the
+ * indexer's checkpoint, or an indexer outage, degrades to direct escrow reads instead of telling a
+ * guest who just paid that the booking is not theirs. */
+export function withFallback(primary: BookingReadModel, fallback: BookingReadModel, warn: (m: string) => void = console.warn): BookingReadModel {
+  return {
+    async getBooking(bookingId) {
+      try {
+        const v = await primary.getBooking(bookingId);
+        if (v) return v;
+      } catch (e) {
+        warn(`indexer read failed, using the chain: ${(e as Error).message}`);
+      }
+      return fallback.getBooking(bookingId);
     },
   };
 }

@@ -1,6 +1,6 @@
 // The indexer-backed read model: mapping, strict validation, 404 = unknown, errors surface.
 import { describe, expect, it } from "vitest";
-import { indexerReadModel } from "../src/readModel.js";
+import { indexerReadModel, withFallback, type BookingReadModel } from "../src/readModel.js";
 
 const ESCROW = "0x3B02fF1e626Ed7a8fd6eC5299e2C54e1421B626B" as const;
 const ID = `0x${"ab".repeat(32)}` as const;
@@ -50,5 +50,22 @@ describe("indexerReadModel", () => {
   });
   it("an indexer error is an error, never a guess", async () => {
     await expect(indexerReadModel("http://idx", ESCROW, { fetch: fake(500, {}) }).getBooking(ID)).rejects.toThrow(/500/);
+  });
+});
+
+describe("withFallback (review 0005 R7)", () => {
+  const view = { state: "ESCROWED" } as never;
+  const model = (f: () => Promise<unknown>): BookingReadModel & { calls: number } => {
+    const m = { calls: 0, getBooking: async () => (m.calls++, f() as never) };
+    return m;
+  };
+  it("uses the indexer when it knows the booking, and the chain when it does not or is down", async () => {
+    const chain = model(async () => view);
+    expect(await withFallback(model(async () => view), chain).getBooking(ID)).toBe(view);
+    expect(chain.calls).toBe(0);
+    expect(await withFallback(model(async () => null), chain).getBooking(ID)).toBe(view); // not indexed yet
+    expect(await withFallback(model(async () => { throw new Error("indexer read API 503"); }), chain, () => {}).getBooking(ID)).toBe(view);
+    expect(chain.calls).toBe(2);
+    expect(await withFallback(model(async () => null), model(async () => null)).getBooking(ID)).toBeNull(); // unknown everywhere
   });
 });

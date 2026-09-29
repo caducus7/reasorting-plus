@@ -153,7 +153,7 @@ export function propertiesFile(): string {
 }
 
 /** A `ponder start` process on a fresh schema, exposing its views under `viewsSchema`. */
-export async function startPonder(o: { dbUrl: string; rpcUrl: string; factory: Address; schema: string; viewsSchema?: string }) {
+export async function startPonder(o: { dbUrl: string; rpcUrl: string; factory: Address; schema: string; viewsSchema?: string; env?: Record<string, string> }) {
   const port = 43_000 + Math.floor(Math.random() * 2_000);
   const args = ["ponder", "start", "--schema", o.schema, "--port", String(port)];
   if (process.env.DEBUG_PONDER) args.push("--log-level", "debug");
@@ -170,6 +170,7 @@ export async function startPonder(o: { dbUrl: string; rpcUrl: string; factory: A
       FACTORY_ADDRESS: o.factory,
       FACTORY_START_BLOCK: "0",
       POLLING_INTERVAL_MS: "200",
+      ...o.env,
     },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,

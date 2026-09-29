@@ -31,6 +31,7 @@ export const RESPONSE: Record<string, string[]> = {
   DIVERGENCE: ["page", "halt_deployment"],
   DEEP_REORG: ["page", "full_replay"],
   LAG: ["page", "check_indexer", "full_replay_if_unrecoverable_reorg"],
+  READ_FAILED: ["page", "check_vault", "write_off_vault"],
 };
 
 /** The projection must keep up with the chain; a stalled indexer is as dangerous as a wrong one. */

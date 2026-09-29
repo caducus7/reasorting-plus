@@ -9,7 +9,7 @@ Environment: `services/apps/indexer/.env.example`.
 
 | Process | Command (in `services/apps/indexer`) | Notes |
 |---|---|---|
-| Ponder | `pnpm start` | `ponder start --schema $PONDER_LIVE_SCHEMA --views-schema $PONDER_SCHEMA`; serves the read API |
+| Ponder | `pnpm start -- -H <private ip>` | `ponder start --schema $PONDER_LIVE_SCHEMA --views-schema $PONDER_SCHEMA`; serves the read API. Bind it to a private interface: `/status` and `/metrics` have no auth, and `/v1/indexer/*` needs `INDEXER_API_TOKEN` (review 0005 R6) |
 | Worker | `pnpm build && pnpm worker` | head tracker, milestones, calendar rows, monitors |
 | Nightly replay | `pnpm build && pnpm replay` | cron, once a day; exit code 1 on a difference |
 
@@ -30,6 +30,7 @@ Alerts are written to `indexer_ops.alerts` and sent to the configured notifier. 
 | `INV-5` | The rebalancer redeems. Halt deployment. |
 | `LAG` | Check the Ponder log. If it says `Encountered unrecoverable reorg`, follow **Deep reorg** below. Otherwise check RPC health and rate limits. |
 | `DEEP_REORG` | Follow **Deep reorg** below. |
+| `READ_FAILED` | That escrow's views revert (usually a broken vault): the owner or guardian checks the vault and calls `writeOffVault` if it stays broken (ADR 0013 §3). Its other alerts stay open meanwhile. |
 | `REPLAY` | The nightly replay differs from production; the replay schema is kept. Treat it as `RECONCILE`. |
 | `CALENDAR` | A booking for a resource with no configured time zone. Fix the properties file; the slot is blocked in UTC meanwhile. |
 
@@ -70,8 +71,8 @@ Design: [ADR 0018](../docs/adr/0018-ical-channel-sync.md). Service: `services/ap
 2. Add an entry to `FEEDS_FILE`:
    `{ "feedId": "<channel>-<property>", "resourceId": "0x…", "channel": "<channel>", "url": "<that URL>" }`.
    The file is secret; never commit it.
-3. Restart ical-sync. It prints this property's **export** URL for the channel, one line per
-   `export <channel> <resourceId>`.
+3. Restart ical-sync, then run `pnpm export-urls` to print this property's **export** URL for the
+   channel. The service never logs these URLs; they are secrets for the channels (review 0005 R5).
 4. Paste that export URL into the channel's **import** calendar setting.
 5. Until the first import succeeds, prepare fails closed for the property. That is expected.
 
@@ -87,7 +88,8 @@ Removing an entry and restarting deletes that feed's blocks.
 
 ### Rotating export URLs
 
-Change `EXPORT_TOKEN_SECRET` and restart, then paste the newly printed URLs into each channel. The
+Change `EXPORT_TOKEN_SECRET` and restart, run `pnpm export-urls`, and paste the new URLs into each
+channel. The
 old URLs stop working at once.
 
 ## Rebalancer (C8)

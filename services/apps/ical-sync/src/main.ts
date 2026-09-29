@@ -6,7 +6,7 @@ import pg from "pg";
 import { LogNotifier } from "@chain/indexer/alerts";
 import { Env, loadFeeds, loadProperties } from "./config.js";
 import { migrate } from "./db.js";
-import { createExportApp, exportToken } from "./export.js";
+import { createExportApp } from "./export.js";
 import { createSync } from "./importer.js";
 import { escrowedSource, exportableSource } from "./sources.js";
 
@@ -33,8 +33,9 @@ async function main() {
   const pairs = [...new Map(feeds.map((f) => [`${f.resourceId}:${f.channel}`, { resourceId: f.resourceId, channel: f.channel }])).values()];
   const app = createExportApp({ secret: env.EXPORT_TOKEN_SECRET, pairs, zones, names, exportable: exportableSource(pool, env.PONDER_SCHEMA, env.CHAIN_ID) });
   serve({ fetch: app.fetch, port: env.PORT, hostname: env.HOST });
-  // Export URLs are secrets for the channels: printed once at start for the owner, never logged per request.
-  for (const p of pairs) console.log(`export ${p.channel} ${p.resourceId}: ${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/ical/${exportToken(env.EXPORT_TOKEN_SECRET, p.resourceId, p.channel)}.ics`);
+  // Export URLs are bearer secrets for the channels: never logged (OWASP Logging Cheat Sheet; review
+  // 0005 R5). The owner prints them on demand with `pnpm export-urls`.
+  console.log(`ical-sync: ${feeds.length} feeds, ${pairs.length} export feeds (pnpm export-urls prints their URLs)`);
 
   for (;;) {
     try {
