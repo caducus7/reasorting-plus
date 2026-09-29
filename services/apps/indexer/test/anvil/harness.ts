@@ -82,11 +82,11 @@ export type Anvil = Awaited<ReturnType<typeof startAnvil>>;
 /** Signs a quote with the local dev signer and deposits it as `guestKey` (funded here). */
 export async function book(
   a: Anvil,
-  o: { guestKey?: Hex; checkInUtc: number; nights: number; priceAtomic: bigint; cutoffs?: { cutoffUtc: number; refundBps: number }[]; finalBps?: number },
+  o: { guestKey?: Hex; checkInUtc: number; nights: number; priceAtomic: bigint; cutoffs?: { cutoffUtc: number; refundBps: number }[]; finalBps?: number; escrow?: Address },
 ) {
   const guestKey = o.guestKey ?? KEYS.guest;
   const guest = privateKeyToAccount(guestKey).address;
-  const escrow = a.dep.escrow;
+  const escrow = o.escrow ?? a.dep.escrow;
   const read = (fn: string) => a.client.readContract({ address: escrow, abi: escrowAbi, functionName: fn as never }) as Promise<number>;
   const q: v1.Quote = {
     resourceId: RESOURCE,

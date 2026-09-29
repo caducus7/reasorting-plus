@@ -1,0 +1,28 @@
+{
+  "name": "@chain/rebalancer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "tsc -p tsconfig.json && vitest run",
+    "test:anvil": "vitest run -c vitest.anvil.config.ts"
+  },
+  "dependencies": {
+    "@chain/abi": "workspace:*",
+    "@chain/indexer": "workspace:*",
+    "@chain/shared": "workspace:*",
+    "@chain/signer": "workspace:*",
+    "pg": "^8.23.0",
+    "viem": "^2.56.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "fast-check": "^4.10.2",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

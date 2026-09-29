@@ -2,20 +2,15 @@
 // SignatureChecker against its `quoteSigner`. Two implementations behind one interface:
 //   - local key: development and tests only; refused when NODE_ENV=production
 //   - KMS: a secp256k1 key held in a KMS (AWS KMS ECC_SECG_P256K1 by default, docs/adr/0012)
+// The KMS primitives live in @chain/signer, shared with the rebalancer (C8).
 // The KMS signer must never be EIP-7702 delegated (ADR 0009 §6): SignatureChecker would then route
 // verification to the delegate's ERC-1271 and every quote would fail.
 
-import { secp256k1 } from "@noble/curves/secp256k1.js";
-import {
-  hashTypedData,
-  recoverAddress,
-  serializeSignature,
-  toHex,
-  type Address,
-  type Hex,
-  type TypedDataDefinition,
-} from "viem";
-import { privateKeyToAccount, publicKeyToAddress as viemPublicKeyToAddress } from "viem/accounts";
+import { hashTypedData, type Address, type Hex, type TypedDataDefinition } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { derToEthSignature, publicKeyToAddress, spkiToPublicKey, type KmsClient } from "@chain/signer";
+
+export { awsKmsClient, derToEthSignature, publicKeyToAddress, spkiToPublicKey, type KmsClient } from "@chain/signer";
 
 export interface QuoteSigner {
   readonly address: Address;
@@ -28,43 +23,6 @@ export function localSigner(privateKey: Hex, env = process.env.NODE_ENV): QuoteS
   return { address: account.address, signTypedData: (def) => account.signTypedData(def as never) };
 }
 
-/** Minimal KMS surface: raw-digest ECDSA over secp256k1, and the key's public key. */
-export interface KmsClient {
-  /** DER-encoded SubjectPublicKeyInfo of the secp256k1 key. */
-  getPublicKey(keyId: string): Promise<Uint8Array>;
-  /** DER-encoded ECDSA-Sig-Value over a 32-byte digest (no further hashing). */
-  signDigest(keyId: string, digest: Uint8Array): Promise<Uint8Array>;
-}
-
-const SECP256K1_N = secp256k1.Point.CURVE().n;
-
-/** Extracts the uncompressed point (65 bytes, 0x04 || X || Y) from a secp256k1 SPKI. */
-export function spkiToPublicKey(spki: Uint8Array): Uint8Array {
-  // secp256k1 SPKI is fixed at 88 bytes: 23-byte header + 0x00 unused-bits + 65-byte point.
-  if (spki.length !== 88 || spki[23] !== 0x04) throw new Error("not a secp256k1 uncompressed SPKI");
-  return spki.slice(23);
-}
-
-/** EIP-55 checksummed address of an uncompressed public key (viem's implementation). */
-export function publicKeyToAddress(pub: Uint8Array): Address {
-  return viemPublicKeyToAddress(toHex(pub));
-}
-
-/** Converts a DER signature over `digest` into a 65-byte Ethereum signature (low-s, v 27/28). */
-export async function derToEthSignature(der: Uint8Array, digest: Hex, expected: Address): Promise<Hex> {
-  const sig = secp256k1.Signature.fromBytes(der, "der");
-  // Ethereum (and OpenZeppelin ECDSA) reject high-s signatures: normalise to s <= n/2.
-  const s = sig.s > SECP256K1_N / 2n ? SECP256K1_N - sig.s : sig.s;
-  const r = toHex(sig.r, { size: 32 });
-  const sHex = toHex(s, { size: 32 });
-  for (const yParity of [0, 1] as const) {
-    const candidate = serializeSignature({ r, s: sHex, yParity });
-    const who = await recoverAddress({ hash: digest, signature: candidate });
-    if (who.toLowerCase() === expected.toLowerCase()) return candidate;
-  }
-  throw new Error("KMS signature does not recover to the KMS key's address");
-}
-
 export async function kmsSigner(kms: KmsClient, keyId: string): Promise<QuoteSigner> {
   const address = publicKeyToAddress(spkiToPublicKey(await kms.getPublicKey(keyId)));
   return {
@@ -73,28 +31,6 @@ export async function kmsSigner(kms: KmsClient, keyId: string): Promise<QuoteSig
       const digest = hashTypedData(def);
       const der = await kms.signDigest(keyId, Buffer.from(digest.slice(2), "hex"));
       return derToEthSignature(der, digest, address);
-    },
-  };
-}
-
-/** AWS KMS adapter (key spec ECC_SECG_P256K1, usage SIGN_VERIFY). Loaded lazily so local runs do
- * not need the SDK configured. */
-export async function awsKmsClient(region: string): Promise<KmsClient> {
-  const { KMSClient, GetPublicKeyCommand, SignCommand } = await import("@aws-sdk/client-kms");
-  const client = new KMSClient({ region });
-  return {
-    async getPublicKey(keyId) {
-      const out = await client.send(new GetPublicKeyCommand({ KeyId: keyId }));
-      if (out.KeySpec !== "ECC_SECG_P256K1") throw new Error(`KMS key ${keyId} is ${out.KeySpec}, not ECC_SECG_P256K1`);
-      if (!out.PublicKey) throw new Error("KMS returned no public key");
-      return out.PublicKey;
-    },
-    async signDigest(keyId, digest) {
-      const out = await client.send(
-        new SignCommand({ KeyId: keyId, Message: digest, MessageType: "DIGEST", SigningAlgorithm: "ECDSA_SHA_256" }),
-      );
-      if (!out.Signature) throw new Error("KMS returned no signature");
-      return out.Signature;
     },
   };
 }

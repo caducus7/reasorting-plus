@@ -89,3 +89,24 @@ Removing an entry and restarting deletes that feed's blocks.
 
 Change `EXPORT_TOKEN_SECRET` and restart, then paste the newly printed URLs into each channel. The
 old URLs stop working at once.
+
+## Rebalancer (C8)
+
+Design: [ADR 0019](../docs/adr/0019-rebalancer-price-and-execution.md). Service:
+`services/apps/rebalancer` (`pnpm build && pnpm start`), against the indexer's database.
+
+- **It starts in dry run.** It decides and logs every cycle without sending. Review
+  `rebalancer.decisions` (the full inputs, checks, decision and outcome of every cycle). Switch to
+  `DRY_RUN=false` only when the owner decides to.
+- **The key** must be each escrow's `rebalancer` (`setRebalancer` by the owner). It is a KMS key in
+  every deployed environment.
+- **Only one process per escrow.** A second one exits with "another rebalancer is running".
+
+| Log outcome / reason | Meaning / first step |
+|---|---|
+| `hold` `price_stale`, `price_unavailable`, `price_out_of_band` | Deployment paused on the USDC price or the sequencer. Nothing to do; it never redeems because of price. |
+| `hold` `cannot_redeem` (alert) | Funds are needed but the vault pays nothing now (paused wrapper, crunch). Watch C6's INV-5; the guest's claim still pays idle first. |
+| `redeem` `liquidity_exit` | Market liquidity fell below 5x our position; everything withdrawable came back. |
+| `precheck_reverted`, `reverted` | The move would fail or failed on-chain; that decision cools down (10 min, doubling to 6 h). Read `detail` for the custom error. |
+| `nonce_consumed` | Another transaction used this key's nonce. Check nothing else signs with the rebalancer key. |
+| `hold` `projection_lagging` | The indexer is behind: see C6's `LAG` alert. |
