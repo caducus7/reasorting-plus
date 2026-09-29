@@ -25,6 +25,7 @@ art each row names. **Status: all eight fixed** (owner decision: "all eight"); s
 
 Reconfirmed open items from earlier handoffs (owner decisions, not bugs): the C7 mass-deletion guard,
 the C8 liquidity exit during a depeg, and the USDC/USD deviation threshold (confirm before mainnet).
+**Follow-up:** all of these, plus the Ponder host binding, are researched and closed in [review 0006](0006-open-items-prior-art.md). The deviation threshold stays a pre-mainnet check.
 
 ## What was checked and held
 

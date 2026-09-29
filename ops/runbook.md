@@ -9,7 +9,7 @@ Environment: `services/apps/indexer/.env.example`.
 
 | Process | Command (in `services/apps/indexer`) | Notes |
 |---|---|---|
-| Ponder | `pnpm start -- -H <private ip>` | `ponder start --schema $PONDER_LIVE_SCHEMA --views-schema $PONDER_SCHEMA`; serves the read API. Bind it to a private interface: `/status` and `/metrics` have no auth, and `/v1/indexer/*` needs `INDEXER_API_TOKEN` (review 0005 R6) |
+| Ponder | `PONDER_HOST=<private ip> pnpm start` | `ponder start --schema $PONDER_LIVE_SCHEMA --views-schema $PONDER_SCHEMA --hostname $PONDER_HOST`; serves the read API. Binds to loopback unless `PONDER_HOST` names a private interface (review 0006 G4): `/status` and `/metrics` have no auth, and `/v1/indexer/*` needs `INDEXER_API_TOKEN` (review 0005 R6) |
 | Worker | `pnpm build && pnpm worker` | head tracker, milestones, calendar rows, monitors |
 | Nightly replay | `pnpm build && pnpm replay` | cron, once a day; exit code 1 on a difference |
 
@@ -85,6 +85,7 @@ Removing an entry and restarting deletes that feed's blocks.
 | `FEED_STALE` | Check the feed URL still works (channels rotate them), check `ical_sync.feed_state.last_error`. Prepare is failing closed for that property meanwhile. |
 | `INV-3` overlap | The owner decides which booking to honour (spec 9 conflict runbook). If ours goes, `cancelByProperty`. Every conflict is in `ical_sync.conflicts`. |
 | `CALENDAR` (from C6) | The property has no time zone in `PROPERTIES_FILE`. |
+| `FEED_MASS_REMOVAL` | A feed dropped at least 2 future blocks and more than half of them at once, or emptied while future blocks existed (review 0006 G1). Those dates stay blocked; new blocks still import. Check the channel's own calendar. If the removals are real (a delisting, several genuine cancellations), run `pnpm confirm-removals <feedId>`: it approves exactly the set held now (`ical_sync.feed_state.held_removals`) and the next poll applies it. If the feed comes back on its own, the hold clears and the alert resolves. Tune with `MASS_REMOVAL_MIN` / `MASS_REMOVAL_FRACTION`. |
 
 ### Rotating export URLs
 

@@ -155,7 +155,7 @@ export function propertiesFile(): string {
 /** A `ponder start` process on a fresh schema, exposing its views under `viewsSchema`. */
 export async function startPonder(o: { dbUrl: string; rpcUrl: string; factory: Address; schema: string; viewsSchema?: string; env?: Record<string, string> }) {
   const port = 43_000 + Math.floor(Math.random() * 2_000);
-  const args = ["ponder", "start", "--schema", o.schema, "--port", String(port)];
+  const args = ["ponder", "start", "--schema", o.schema, "--port", String(port), "--hostname", "127.0.0.1"];
   if (process.env.DEBUG_PONDER) args.push("--log-level", "debug");
   if (o.viewsSchema) args.push("--views-schema", o.viewsSchema);
   let log = "";

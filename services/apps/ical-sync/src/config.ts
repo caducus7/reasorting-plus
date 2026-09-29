@@ -19,6 +19,9 @@ export const Env = z
     POLL_INTERVAL_SEC: int(60, 3_600).default(300), // spec 9: 5 minutes
     MAX_BACKOFF_SEC: int(60, 86_400).default(3_600),
     STALE_ALERT_SEC: int(60, 86_400).default(900), // = C5 FEED_MAX_AGE_SEC
+    /** Mass-removal guard (review 0006 G1): hold >= MIN future removals that exceed FRACTION of them. */
+    MASS_REMOVAL_MIN: int(1, 10_000).default(2),
+    MASS_REMOVAL_FRACTION: z.coerce.number().min(0).max(1).default(0.5),
     /** Anvil only: admit loopback feeds over http for local tests. */
     ALLOW_LOCAL_FEEDS: z.enum(["0", "1"]).default("0"),
   })

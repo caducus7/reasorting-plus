@@ -68,6 +68,35 @@ Staleness is surfaced in two ways:
   closed until its first import.
 - **For people:** a `FEED_STALE` alert after 900 s, the same value as C5's `FEED_MAX_AGE_SEC`.
 
+### 4a. Mass-removal guard (amendment, review 0006 G1)
+
+An empty or truncated export that still answers 200 would delete every block and reopen those dates.
+Prior art:
+- **Microsoft Entra Connect, "prevent accidental deletes":** on by default. An export that stages
+  more deletes than a threshold (default 500) is stopped, and an admin approves it.
+- **rsync / rclone `--max-delete`.**
+
+Adapted to the asymmetry here, where a kept block costs a sale and a lost block risks a double
+booking:
+- **What is held:** an import that would remove at least `MASS_REMOVAL_MIN` (2) future blocks and
+  more than `MASS_REMOVAL_FRACTION` (50%) of the feed's future blocks, or that leaves the feed with no
+  events while future blocks exist. Only those removals are held; they stay in `calendar_blocks`
+  (`ical_sync.feed_state.held_removals`).
+- **What still applies:** additions, changes, and removals of past blocks. The stored set is then a
+  superset of the feed, so the import counts as a success, `last_success_at` moves on, and C5 keeps
+  quoting the rest of the calendar.
+- **Signal and approval:**
+  - A `FEED_MASS_REMOVAL:<feedId>` alert opens once.
+  - `pnpm confirm-removals <feedId>` approves exactly the set held at that moment. A removal that
+    grows afterwards is judged again.
+  - Approving clears the conditional-GET validators, so the next poll re-imports rather than getting
+    a 304.
+- **Self-healing:** if the feed brings the events back, the hold clears and the alert resolves.
+- **Future** means checkout after today in the property's zone, so a current stay counts.
+
+**Known false positive:** a property whose only future booking is cancelled on a channel whose
+export is then empty. It is held until confirmed, and the dates stay blocked, which is the safe side.
+
 ## 5. Conflicts (INV-3)
 
 After each import, C7 checks the resource with **C6's own `inv3`** against the same set of bookings:

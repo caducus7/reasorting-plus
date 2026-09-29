@@ -8,6 +8,7 @@ import type pg from "pg";
 import { AlertOutbox, type Notifier } from "@chain/indexer/alerts";
 import { inv3, type Breach } from "@chain/indexer/invariants";
 import { localStay } from "@chain/indexer/calendar";
+import { DateTime } from "luxon";
 import { fetchFeed, type FetchOptions } from "./fetch.js";
 import { parseFeed } from "./parse.js";
 
@@ -29,7 +30,24 @@ export type SyncDeps = {
   maxBackoffSec?: number;
   staleAlertSec?: number; // align with C5's FEED_MAX_AGE_SEC
   jitter?: () => number; // multiplier around 1 (default 0.9..1.1)
+  massRemoval?: MassRemovalPolicy;
 };
+
+/** Review 0006 G1. An import that would remove at least `minCount` future blocks and more than
+ * `fraction` of them, or that empties the feed of events while future blocks exist, holds those
+ * removals until approved (Entra Connect's accidental-delete threshold, adapted: see ADR 0018). */
+export type MassRemovalPolicy = { minCount: number; fraction: number };
+export const MASS_REMOVAL_DEFAULTS: MassRemovalPolicy = { minCount: 2, fraction: 0.5 };
+
+/** Which removed future blocks to hold. Pure; `priorFuture` counts the feed's stored future blocks. */
+export function heldRemovals(p: { removedFuture: string[]; approved: string[]; priorFuture: number; feedEmpty: boolean }, policy = MASS_REMOVAL_DEFAULTS): string[] {
+  const approved = new Set(p.approved);
+  const unapproved = p.removedFuture.filter((r) => !approved.has(r));
+  if (unapproved.length === 0) return [];
+  const base = p.priorFuture - (p.removedFuture.length - unapproved.length); // approved ones are no longer in question
+  const mass = unapproved.length >= policy.minCount && unapproved.length > policy.fraction * base;
+  return mass || p.feedEmpty ? unapproved : [];
+}
 
 const lc = (s: string) => s.toLowerCase();
 
@@ -40,6 +58,7 @@ export function createSync(d: SyncDeps) {
   const jitter = d.jitter ?? (() => 0.9 + Math.random() * 0.2);
   const outbox = new AlertOutbox(d.pool, d.chainId, d.notifiers);
   const tzOf = (r: string) => d.zones.get(lc(r));
+  const massKey = (feedId: string) => `FEED_MASS_REMOVAL:${feedId}`;
 
   /** Registers configured feeds (never-imported = stale for C5) and removes unconfigured ones. */
   async function syncConfig() {
@@ -107,10 +126,25 @@ export function createSync(d: SyncDeps) {
       return fail(f, st.failures, t, "parse", (e as Error).message);
     }
     const c = await d.pool.connect();
+    let held: string[] = [];
+    let priorFuture = 0;
     try {
       await c.query("BEGIN");
       const refs = parsed.blocks.map((b) => b.ref);
-      await c.query("DELETE FROM calendar_blocks WHERE resource_id = $1 AND source = $2 AND NOT (ref = ANY($3::text[]))", [lc(f.resourceId), f.feedId, refs]);
+      // Future = checkout after today in the property's zone: a current stay counts.
+      const today = DateTime.fromJSDate(t).setZone(tz).toISODate()!;
+      const stored = (
+        await c.query("SELECT ref, upper(stay) > $3::date AS future FROM calendar_blocks WHERE resource_id = $1 AND source = $2 FOR UPDATE", [lc(f.resourceId), f.feedId, today])
+      ).rows as { ref: string; future: boolean }[];
+      const approved = ((await c.query("SELECT approved_removals FROM ical_sync.feed_state WHERE feed_id = $1 FOR UPDATE", [f.feedId])).rows[0]?.approved_removals ?? []) as string[];
+      const inFeed = new Set(refs);
+      priorFuture = stored.filter((b) => b.future).length;
+      held = heldRemovals(
+        { removedFuture: stored.filter((b) => b.future && !inFeed.has(b.ref)).map((b) => b.ref), approved, priorFuture, feedEmpty: parsed.blocks.length === 0 },
+        d.massRemoval,
+      );
+      await c.query("DELETE FROM calendar_blocks WHERE resource_id = $1 AND source = $2 AND NOT (ref = ANY($3::text[]))", [lc(f.resourceId), f.feedId, [...refs, ...held]]);
+      await c.query("UPDATE ical_sync.feed_state SET held_removals = $2, approved_removals = '{}' WHERE feed_id = $1", [f.feedId, held]);
       for (const b of parsed.blocks) {
         await c.query(
           `INSERT INTO calendar_blocks (resource_id, stay, source, ref) VALUES ($1, daterange($2::date, $3::date), $4, $5)
@@ -126,6 +160,20 @@ export function createSync(d: SyncDeps) {
     } finally {
       c.release();
     }
+    // Held blocks stay in calendar_blocks, so the import still counts as a success (the stored set is
+    // a superset of the feed: no date reopens) and C5 keeps quoting the rest of the calendar.
+    if (held.length === 0) return outbox.resolve([massKey(f.feedId)]);
+    console.warn(JSON.stringify({ at: t.toISOString(), feed: f.feedId, heldRemovals: held.length, priorFutureBlocks: priorFuture }));
+    await outbox.open([
+      {
+        invariant: "FEED_MASS_REMOVAL",
+        severity: "alert",
+        key: massKey(f.feedId),
+        message: `channel feed ${f.feedId} (${lc(f.resourceId)}) dropped ${held.length} of ${priorFuture} future blocks at once: kept blocked until the owner confirms on the channel and runs \`pnpm confirm-removals ${f.feedId}\``,
+        details: { held: held.length, priorFuture },
+        response: ["check_channel_feed", "confirm_removals"],
+      },
+    ]);
   }
 
   /** Polls every feed whose next attempt is due, then checks every configured resource for

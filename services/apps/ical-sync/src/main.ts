@@ -27,6 +27,7 @@ async function main() {
     pollIntervalSec: env.POLL_INTERVAL_SEC,
     maxBackoffSec: env.MAX_BACKOFF_SEC,
     staleAlertSec: env.STALE_ALERT_SEC,
+    massRemoval: { minCount: env.MASS_REMOVAL_MIN, fraction: env.MASS_REMOVAL_FRACTION },
   });
   await sync.syncConfig();
 

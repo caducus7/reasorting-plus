@@ -8,7 +8,8 @@
     "start": "node dist/main.js",
     "test": "tsc -p tsconfig.json && vitest run",
     "test:anvil": "vitest run -c vitest.anvil.config.ts",
-    "export-urls": "node dist/export-urls.js"
+    "export-urls": "node dist/export-urls.js",
+    "confirm-removals": "node dist/confirm-removals.js"
   },
   "dependencies": {
     "@chain/indexer": "workspace:*",

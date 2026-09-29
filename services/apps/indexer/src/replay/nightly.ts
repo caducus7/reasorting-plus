@@ -26,7 +26,7 @@ export async function runReplay(o: ReplayOpts): Promise<{ schema: string; upTo: 
   const schema = o.replaySchema ?? `replay_${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14)}`;
   const target = await checkpoint(o.pool, o.prodSchema);
   const port = String(44_000 + Math.floor(Math.random() * 2_000));
-  const proc = spawn("npx", ["ponder", "start", "--schema", schema, "--port", port], {
+  const proc = spawn("npx", ["ponder", "start", "--schema", schema, "--port", port, "--hostname", "127.0.0.1"], {
     cwd: APP,
     env: { ...process.env, ...o.env },
     stdio: "ignore",

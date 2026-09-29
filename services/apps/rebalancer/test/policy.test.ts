@@ -40,6 +40,10 @@ const rows: Row[] = [
   ["depeg (-1.5%): no deploy", base({ price: { ok: true, answer: 98_500_000n, updatedAt: NOW - 60n } }), { kind: "hold", reason: "price_out_of_band" }],
   ["depeg (+1.5%): no deploy", base({ price: { ok: true, answer: 101_500_000n, updatedAt: NOW - 60n } }), { kind: "hold", reason: "price_out_of_band" }],
   ["depeg while deployed and liquid: never redeem because of price", base({ idle: 10_001n * U, idleFinalized: 10_001n * U, position: 90_000n * U, maxWithdraw: 90_000n * U, price: { ok: true, answer: 95_000_000n, updatedAt: NOW - 60n } }), { kind: "hold", reason: "price_out_of_band" }],
+  // Review 0006 G2: the position is a USDC claim against USDC liabilities, so exiting during a depeg
+  // realises no USD-price loss; what a depeg threatens is pool liquidity (Aave, March 2023). The exit wins.
+  ["depeg and a liquidity crunch together: the liquidity exit still fires", base({ idle: 10_001n * U, position: 90_000n * U, maxWithdraw: 90_000n * U, marketAvailable: 449_999n * U, price: { ok: true, answer: 95_000_000n, updatedAt: NOW - 60n } }), { kind: "redeem", reason: "liquidity_exit", amount: 90_000n * U }],
+  ["depeg, crunch and an unreadable price: the exit does not wait on the oracle", base({ idle: 10_001n * U, position: 90_000n * U, maxWithdraw: 90_000n * U, marketAvailable: 449_999n * U, price: { ok: false, reason: "sequencer_down" } }), { kind: "redeem", reason: "liquidity_exit", amount: 90_000n * U }],
   ["depeg and a booking inside 14 days: the refund comes first", base({ idle: 10_001n * U, position: 90_000n * U, maxWithdraw: 90_000n * U, required: 60_000n * U, price: { ok: true, answer: 95_000_000n, updatedAt: NOW - 60n } }), { kind: "redeem", reason: "below_required", amount: 49_999n * U }],
   ["within 1%: deploy", base({ price: { ok: true, answer: 99_000_000n, updatedAt: NOW - 60n } }), { kind: "deploy", amount: 90_000n * U }],
   ["lossDebt outstanding: no deploy", base({ lossDebt: 5n * U }), { kind: "hold", reason: "loss_active" }],
