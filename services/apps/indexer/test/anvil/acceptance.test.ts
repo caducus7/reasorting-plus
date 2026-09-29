@@ -13,6 +13,8 @@ import { diffSchemas, clean } from "../../src/replay/diff.js";
 import { runReplay } from "../../src/replay/nightly.js";
 import { freshDb, propertiesFile, startAnvil, startPonder, type Anvil, type Ponder } from "./harness.js";
 import { runScenario } from "./scenario.js";
+// C5's two read models, compared on the same history (C5 owns the file; this is its integration check).
+import { chainReadModel, indexerReadModel } from "../../../quote-service/src/readModel.js";
 
 const GENESIS = Date.parse("2026-06-01T09:00:00Z") / 1000;
 const STATES = ["NONE", "ESCROWED", "DELIVERED", "FROZEN", "DISPUTED", "SETTLED"];
@@ -96,6 +98,16 @@ describe("C6 acceptance on Anvil", () => {
     const fin = await get(`/v1/indexer/escrows/${a.dep.escrow}/summary?head=finalized`);
     expect(fin.status).toBe(200);
     expect(BigInt(fin.body.asOf ? (fin.body.asOf as { block: string }).block : 0)).toBeLessThan(await a.client.getBlockNumber());
+  });
+
+  it("C5's indexer read model returns the same BookingView as its chain read model, for every booking", async () => {
+    const viaIndexer = indexerReadModel(ponder.base, a.dep.escrow);
+    const viaChain = chainReadModel(a.client as PublicClient, a.dep.escrow, 0n);
+    for (const b of scenario.all) {
+      const [i, c] = [await viaIndexer.getBooking(b.bookingId), await viaChain.getBooking(b.bookingId)];
+      expect(i, b.bookingId).toEqual(c);
+    }
+    expect(await viaIndexer.getBooking(`0x${"00".repeat(32)}`)).toBeNull();
   });
 
   it("read API latency p95 < 100 ms", async () => {

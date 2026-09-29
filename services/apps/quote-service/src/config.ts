@@ -20,6 +20,8 @@ export const Env = z
     /** Block the interim read model scans events from (the escrow's creation block). */
     ESCROW_FROM_BLOCK: z.coerce.bigint().default(0n),
     PROPERTIES_FILE: z.string().min(1),
+    /** C6 indexer read API (docs/adr/0017 §8). Unset: read bookings directly from the chain. */
+    INDEXER_URL: z.url().optional(),
     SIGNER: z.enum(["kms", "local"]).default("kms"),
     KMS_KEY_ID: z.string().optional(),
     AWS_REGION: z.string().optional(),

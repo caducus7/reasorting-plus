@@ -6,7 +6,7 @@ import { readDomain, readUsdcAddress } from "./chain.js";
 import { escrowReader } from "./chain.js";
 import { loadEnv, loadProperties } from "./config.js";
 import { connect, migrate, pgCalendar } from "./db.js";
-import { chainReadModel } from "./readModel.js";
+import { chainReadModel, indexerReadModel } from "./readModel.js";
 import { awsKmsClient, kmsSigner, localSigner, type QuoteSigner } from "./signer.js";
 import { ESCROW_EIP712_NAME, ESCROW_EIP712_VERSION } from "@chain/shared/eip712";
 
@@ -40,7 +40,9 @@ const app = createApp({
   calendar: pgCalendar(db),
   chain,
   signer,
-  bookings: chainReadModel(client, env.ESCROW, env.ESCROW_FROM_BLOCK),
+  bookings: env.INDEXER_URL
+    ? indexerReadModel(env.INDEXER_URL, env.ESCROW)
+    : chainReadModel(client, env.ESCROW, env.ESCROW_FROM_BLOCK),
   auth: await jwtAuth({
     issuer: env.JWT_ISSUER,
     audience: env.JWT_AUDIENCE,

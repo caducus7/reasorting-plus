@@ -1,11 +1,12 @@
-// Booking read model for GET /v1/bookings/{id}, cancel-preview and yield terms. C6 (indexer) owns the
-// production read model; until it lands this interim implementation reads the escrow directly over
-// RPC (C5 brief: "back them with an interface"). It uses only views and indexed-event lookups.
+// Booking read model for GET /v1/bookings/{id}, cancel-preview and yield terms, behind an interface
+// (C5 brief). Production: `indexerReadModel`, the C6 indexer's read API (INDEXER_URL). Fallback when
+// no indexer is configured: `chainReadModel`, direct escrow views over RPC.
 
-import { parseAbiItem, type Address, type Hex, type PublicClient } from "viem";
+import { getAddress, parseAbiItem, type Address, type Hex, type PublicClient } from "viem";
+import { z } from "zod";
 import { escrowAbi } from "@chain/abi";
 import { bookingYield, type Cutoff } from "@chain/shared";
-import type { v1 } from "@chain/shared";
+import { v1 } from "@chain/shared";
 
 export type BookingView = {
   state: v1.BookingState;
@@ -105,6 +106,56 @@ export function chainReadModel(client: PublicClient, escrow: Address, fromBlock:
         claimableAtomic: claimable,
         txHash: (deposits[0]?.transactionHash ?? `0x${"00".repeat(32)}`) as Hex,
       };
+    },
+  };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Production read model: the C6 indexer's read API (docs/adr/0017 §8). Same BookingView, from the
+// projection instead of RPC. Every response is validated; anything unexpected is an error, never a
+// guess. A booking the indexer has not seen yet (deposit newer than its checkpoint) reads as unknown,
+// which the API already treats like "not yours" (403), so nothing is revealed early.
+
+const Atomic = z.string().regex(/^(0|[1-9][0-9]*)$/).transform(BigInt);
+const Hex32 = z.string().regex(/^0x[0-9a-fA-F]{64}$/).transform((s) => s.toLowerCase() as Hex);
+const Addr = z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform((s) => getAddress(s)); // Ponder stores lowercase
+const IndexerBooking = z.object({
+  bookingId: Hex32,
+  state: v1.BookingState,
+  outcome: v1.BookingOutcome.nullable(),
+  guest: Addr,
+  resourceId: Hex32,
+  checkInUtc: z.number().int(),
+  checkOutUtc: z.number().int(),
+  principalAtomic: Atomic,
+  feeBps: z.number().int().min(0).max(10_000),
+  guestYieldBps: z.number().int().min(0).max(10_000),
+  finalBps: z.number().int().min(0).max(10_000),
+  cutoffs: z.array(z.object({ cutoffUtc: z.number().int(), refundBps: z.number().int().min(0).max(10_000) })),
+  frozenTotal: z.number().int().min(0),
+  accruedGuestYieldAtomic: Atomic,
+  claimableAtomic: Atomic,
+  txHash: Hex32,
+});
+
+export function indexerReadModel(
+  baseUrl: string,
+  escrow: Address,
+  opts: { timeoutMs?: number; fetch?: typeof fetch } = {},
+): BookingReadModel {
+  const f = opts.fetch ?? fetch;
+  const base = baseUrl.replace(/\/+$/, "");
+  return {
+    async getBooking(bookingId) {
+      const r = await f(`${base}/v1/indexer/bookings/${escrow}/${bookingId}`, {
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 2_000),
+      });
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`indexer read API ${r.status}`);
+      const b = IndexerBooking.parse(await r.json());
+      if (b.bookingId !== bookingId.toLowerCase()) throw new Error("indexer returned a different booking");
+      const { bookingId: _id, ...view } = b;
+      return view;
     },
   };
 }
