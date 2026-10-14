@@ -114,3 +114,15 @@ Design: [ADR 0019](../docs/adr/0019-rebalancer-price-and-execution.md). Service:
 | `nonce_consumed` | Another transaction used this key's nonce. Check nothing else signs with the rebalancer key. |
 | `hold` `projection_lagging` | The indexer is behind: see C6's `LAG` alert. |
 | `UTILISATION` alert | The Aave USDC market is past its rate kink by more than half the headroom to 100% (95% at a 90% kink). Monitoring only: nothing is gated on it (spec 6.7). Every cycle logs `{utilisation, optimal, available}`. Watch `available` against 5x our position; the exit rule acts on its own. It resolves at or below the kink. |
+
+## Deployment preflight (Base Sepolia, then mainnet)
+
+Rehearse first: `pnpm -r build && pnpm --filter @chain/rehearsal rehearse`. It runs the real deploy
+scripts and every service on a local fork; see `docs/rehearsals/` and
+`docs/handoffs/rehearsal-sepolia-fork.md`.
+
+- **Signer addresses need no code.** Every signer address (quote signer, rebalancer, owner, admin) must have no code: `cast code <address>` prints `0x`.
+  - An EIP-7702 delegation (`0xef0100…`) on the quote signer makes every quote revert. The quote service refuses to start in that case.
+  - Use fresh KMS keys. Never use Anvil's dev keys or reused EOAs: on Base Sepolia all ten dev keys are delegated by third parties.
+- **Gas:** about 11.7M gas for libraries, the implementation, the factory, the testnet vault and setup (rehearsal measurement). Fund the deployer with ≥ 0.01 Sepolia ETH.
+- **Clients sending escrow calls one at a time** should use `estimate + 60,000` gas, or submit them atomically with EIP-5792. Otherwise a claim can run out of gas when it books a yield gain its estimate missed.

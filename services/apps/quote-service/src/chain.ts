@@ -96,3 +96,16 @@ export async function readUsdcAddress(client: PublicClient, escrow: Address): Pr
 export async function usdcDecimals(client: PublicClient, usdc: Address): Promise<number> {
   return Number(await client.readContract({ address: usdc, abi: erc20Abi, functionName: "decimals" }));
 }
+
+/** The quote signer must be a plain EOA. The escrow verifies quotes with OpenZeppelin
+ * SignatureChecker, which asks any address with code for ERC-1271 instead of checking ECDSA; an
+ * EIP-7702 delegation (code 0xef0100 || delegate) therefore makes every service-signed quote revert
+ * InvalidQuoteSignature at deposit (C1 fork test test_eip7702DelegatedSignerRejectsEcdsaQuotes).
+ * Found in the Base Sepolia fork rehearsal: Anvil's public dev keys carry 7702 delegations there. */
+export async function assertSignerHasNoCode(client: Pick<PublicClient, "getCode">, signer: Address): Promise<void> {
+  const code = await client.getCode({ address: signer });
+  if (code && code !== "0x") {
+    const what = code.startsWith("0xef0100") ? `an EIP-7702 delegation to 0x${code.slice(8, 48)}` : "contract code";
+    throw new Error(`quote signer ${signer} has ${what}: the escrow would reject every ECDSA quote it signs (use a fresh KMS key)`);
+  }
+}

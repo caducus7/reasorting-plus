@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { createPublicClient, http, type Hex, type PublicClient } from "viem";
 import { createApp } from "./app.js";
 import { jwtAuth } from "./auth.js";
-import { readDomain, readUsdcAddress } from "./chain.js";
+import { assertSignerHasNoCode, readDomain, readUsdcAddress } from "./chain.js";
 import { escrowReader } from "./chain.js";
 import { loadEnv, loadProperties } from "./config.js";
 import { connect, migrate, pgCalendar } from "./db.js";
@@ -31,6 +31,7 @@ const signer: QuoteSigner =
 const db = connect(env.DATABASE_URL);
 await migrate(db);
 const chain = escrowReader(client, env.ESCROW);
+await assertSignerHasNoCode(client, signer.address);
 const terms = await chain.liveTerms();
 if (terms.quoteSigner.toLowerCase() !== signer.address.toLowerCase()) {
   throw new Error(`escrow quoteSigner ${terms.quoteSigner} is not this service's signer ${signer.address}`);

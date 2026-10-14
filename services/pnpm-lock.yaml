@@ -244,6 +244,43 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.4)
 
+  apps/rehearsal:
+    dependencies:
+      '@chain/abi':
+        specifier: workspace:*
+        version: link:../../packages/abi
+      '@chain/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@chain/signer':
+        specifier: workspace:*
+        version: link:../../packages/signer
+      '@noble/curves':
+        specifier: ^2.4.0
+        version: 2.4.0
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+      viem:
+        specifier: ^2.56.9
+        version: 2.56.9(typescript@5.9.3)(zod@4.6.5)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.4
+        version: 22.20.4
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@22.20.4)
+
   packages/abi:
     devDependencies:
       typescript:
