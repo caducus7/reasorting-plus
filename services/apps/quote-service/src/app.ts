@@ -32,6 +32,7 @@ import {
 import { InvalidPolicy, InvalidStay, isoLocal, isoUtc, materialiseStay, refundCurve, type Property, type Stay } from "./property.js";
 import type { BookingReadModel, BookingView } from "./readModel.js";
 import type { QuoteSigner } from "./signer.js";
+import type { ApySource } from "./apy.js";
 import { DateTime } from "luxon";
 
 export type Settings = {
@@ -44,6 +45,8 @@ export type Settings = {
   maxClockSkewSec: number; // chain time vs server clock; holds use one, quotes the other
   apyEstimateBps: number;
   yieldProtocol: string;
+  /** Live APY (brief C5). Absent: the static apyEstimateBps, as of the request. */
+  apy?: ApySource;
 };
 
 export type Deps = {
@@ -455,15 +458,14 @@ export function createApp(d: Deps): Hono {
       checkInUtc = b.checkInUtc;
       guestYieldBps = b.guestYieldBps;
     }
+    const apy = s.apy ? await s.apy() : { bps: s.apyEstimateBps, asOf: Math.floor(t.getTime() / 1000) };
     return send(c, v1.YieldTermsResponse, {
       guestYieldBps,
       vestingRule: "completed_stay_no_refund",
-      apyEstimateBps: s.apyEstimateBps,
-      estimatedGuestYieldAtomic: toAtomicString(
-        estimateGuestYield(price, checkInUtc, Math.floor(t.getTime() / 1000), s.apyEstimateBps, guestYieldBps),
-      ),
+      apyEstimateBps: apy.bps,
+      estimatedGuestYieldAtomic: toAtomicString(estimateGuestYield(price, checkInUtc, Math.floor(t.getTime() / 1000), apy.bps, guestYieldBps)),
       protocol: s.yieldProtocol,
-      asOf: isoUtc(Math.floor(t.getTime() / 1000)),
+      asOf: isoUtc(apy.asOf), // when the rate was observed
     });
   });
 

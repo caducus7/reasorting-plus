@@ -113,3 +113,4 @@ Design: [ADR 0019](../docs/adr/0019-rebalancer-price-and-execution.md). Service:
 | `precheck_reverted`, `reverted` | The move would fail or failed on-chain; that decision cools down (10 min, doubling to 6 h). Read `detail` for the custom error. |
 | `nonce_consumed` | Another transaction used this key's nonce. Check nothing else signs with the rebalancer key. |
 | `hold` `projection_lagging` | The indexer is behind: see C6's `LAG` alert. |
+| `UTILISATION` alert | The Aave USDC market is past its rate kink by more than half the headroom to 100% (95% at a 90% kink). Monitoring only: nothing is gated on it (spec 6.7). Every cycle logs `{utilisation, optimal, available}`. Watch `available` against 5x our position; the exit rule acts on its own. It resolves at or below the kink. |

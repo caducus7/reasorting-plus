@@ -147,4 +147,73 @@ contract AaveStataEscrowForkTest is AaveFork {
         assertEq(escrow.claim(), idle, "idle paid despite the paused wrapper");
         assertEq(escrow.claimableOf(guest), 1_000_000e6 - idle);
     }
+
+    /// Review 0004's open item: the stranded-vault path (ADR 0013 §3, 0015 §2) against the real
+    /// wrapper. A paused wrapper is written off; guests are paid from idle without a revert; once Aave
+    /// unpauses, a guest claim pulls from the written-off vault (try/catch, measured delta) and books
+    /// it before paying; the rebalancer may still redeem; recoverVault brings the rest back into
+    /// accounting. Books stay within the escrow's balance at every step.
+    function test_writtenOffWrapper_paysIdleThenPullsOnRecovery() public {
+        (bytes32 id,) = _book(1_000_000e6);
+        _deploy(900_000e6);
+        vm.warp(block.timestamp + 7 days);
+        address pauser = makeAddr("aave-emergency-admin");
+        vm.prank(ACL_ADMIN);
+        IAclManager(ACL_MANAGER).addEmergencyAdmin(pauser);
+        vm.prank(pauser);
+        IStataPause(STATA_USDC).setPaused(true);
+
+        vm.prank(owner);
+        escrow.writeOffVault();
+        assertTrue(escrow.vaultWrittenOff());
+        uint256 idle = IERC20(USDC).balanceOf(address(escrow));
+        assertEq(escrow.totalAssets(), idle, "a written-off vault is outside valuation");
+
+        vm.prank(guest);
+        escrow.cancelByGuest(id);
+        vm.prank(guest);
+        assertEq(escrow.claim(), idle, "idle paid while the wrapper is paused and written off");
+        uint256 owed = escrow.claimableOf(guest);
+        assertEq(owed, 1_000_000e6 - idle);
+        // accrue() never lowers lastAssets on a dip (ADR 0009): the stranded value is still owned,
+        // just outside valuation. Books stay within idle plus what the wrapper holds for us.
+        assertLe(
+            escrow.lastAssets(),
+            IERC20(USDC).balanceOf(address(escrow)) + _position(),
+            "books within idle + stranded"
+        );
+
+        vm.prank(pauser);
+        IStataPause(STATA_USDC).setPaused(false);
+        uint256 shares = vault.balanceOf(address(escrow));
+        vm.prank(guest);
+        uint256 paid = escrow.claim();
+        assertEq(paid, owed, "the stranded position pays the guest in full once Aave unpauses");
+        assertEq(escrow.claimableOf(guest), 0);
+        assertLt(vault.balanceOf(address(escrow)), shares, "pulled from the written-off vault");
+        assertLe(
+            escrow.lastAssets(),
+            IERC20(USDC).balanceOf(address(escrow)) + _position(),
+            "books within idle + stranded"
+        );
+
+        // The rebalancer may still redeem from a written-off vault (Yearn: remove all possible assets).
+        uint256 before = IERC20(USDC).balanceOf(address(escrow));
+        uint256 half = vault.maxWithdraw(address(escrow)) / 2;
+        assertGt(half, 0, "some position left after the guest's pull");
+        vm.prank(rebalancer);
+        escrow.redeem(half);
+        assertEq(IERC20(USDC).balanceOf(address(escrow)), before + half);
+
+        vm.prank(owner);
+        escrow.recoverVault();
+        assertFalse(escrow.vaultWrittenOff());
+        assertApproxEqAbs(
+            escrow.totalAssets(),
+            IERC20(USDC).balanceOf(address(escrow)) + _position(),
+            1,
+            "valuation includes the vault again"
+        );
+        assertEq(escrow.lossDebt(), 0, "no loss: the recovered value is a gain");
+    }
 }

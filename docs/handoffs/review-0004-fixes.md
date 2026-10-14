@@ -70,3 +70,7 @@ None. `IEscrow`, `IEscrowFactory`, the events and the ABIs are unchanged.
 ## Blocked
 
 Nothing.
+
+## Update: 2026-10-14 (completion pass)
+
+- **The stranded-vault fork test against the real Aave wrapper is done.** See `C4.md`, update of 2026-10-14.

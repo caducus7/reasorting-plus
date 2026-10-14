@@ -36,7 +36,12 @@ export const Env = z
     QUOTE_TTL_SEC: int(60, 3_600).default(900),
     FEED_MAX_AGE_SEC: int(60, 86_400).default(900),
     MAX_CLOCK_SKEW_SEC: int(5, 600).default(120),
+    /** Fallback and testnet APY (the mock vault has no market rate). */
     APY_ESTIMATE_BPS: int(0, 10_000).default(400),
+    /** market: Aave reserve supply rate (default on Base mainnet); config: APY_ESTIMATE_BPS only. */
+    APY_SOURCE: z.enum(["market", "config"]).optional(),
+    /** Aave V3 Pool on Base: bgd-labs/aave-address-book AaveV3Base.POOL (docs/adr/0019). */
+    AAVE_POOL: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
     YIELD_PROTOCOL: z.string().default("Aave V3 USDC on Base"),
   })
   .superRefine((e, ctx) => {
@@ -45,6 +50,9 @@ export const Env = z
     }
     if (e.SIGNER === "local" && (!e.LOCAL_SIGNER_PK || e.CHAIN_ID !== 31_337)) {
       ctx.addIssue({ code: "custom", message: "SIGNER=local needs LOCAL_SIGNER_PK and is Anvil-only (CHAIN_ID=31337)" });
+    }
+    if ((e.APY_SOURCE ?? (e.CHAIN_ID === 8_453 ? "market" : "config")) === "market" && e.CHAIN_ID !== 8_453 && !e.AAVE_POOL) {
+      ctx.addIssue({ code: "custom", message: "APY_SOURCE=market off Base mainnet needs AAVE_POOL" });
     }
     if (!e.JWT_PUBLIC_KEY_PEM === !e.JWT_JWKS_URL) {
       ctx.addIssue({ code: "custom", message: "set exactly one of JWT_PUBLIC_KEY_PEM or JWT_JWKS_URL" });

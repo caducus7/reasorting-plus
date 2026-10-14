@@ -132,3 +132,10 @@ CLAUDE.md money rule 4 and the "designs that look like bugs" table are updated t
 ## Blocked
 
 Nothing.
+
+## Update: 2026-10-14 (completion pass)
+
+- **All three "Not done" items are closed:**
+  - the testnet mock-vault script (C4: `DeployTestnetVault.s.sol`, offset 12, seeded to `0xdEaD`);
+  - the amended INV-1 monitor (C6);
+  - `ops/runbook.md` (C6 to C8, review 0006).

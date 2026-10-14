@@ -7,6 +7,7 @@ import { escrowReader } from "./chain.js";
 import { loadEnv, loadProperties } from "./config.js";
 import { connect, migrate, pgCalendar } from "./db.js";
 import { chainReadModel, indexerReadModel, withFallback } from "./readModel.js";
+import { aaveSupplyRate, marketApy, staticApy } from "./apy.js";
 import { awsKmsClient, kmsSigner, localSigner, type QuoteSigner } from "./signer.js";
 import { ESCROW_EIP712_NAME, ESCROW_EIP712_VERSION } from "@chain/shared/eip712";
 
@@ -35,6 +36,12 @@ if (terms.quoteSigner.toLowerCase() !== signer.address.toLowerCase()) {
   throw new Error(`escrow quoteSigner ${terms.quoteSigner} is not this service's signer ${signer.address}`);
 }
 
+// Live APY (brief C5). Base mainnet defaults to the Aave reserve rate; testnets use the config value.
+const apySource = env.APY_SOURCE ?? (chainId === 8_453 ? "market" : "config");
+const aavePool = (env.AAVE_POOL ?? "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5") as Hex; // aave-address-book AaveV3Base.POOL
+const apy = apySource === "market" ? marketApy(aaveSupplyRate(client, aavePool, usdc), { fallbackBps: env.APY_ESTIMATE_BPS }) : staticApy(env.APY_ESTIMATE_BPS);
+if (apySource === "market") console.log(`apy: market ${(await apy()).bps} bps from Aave pool ${aavePool}`);
+
 const app = createApp({
   db,
   calendar: pgCalendar(db),
@@ -60,6 +67,7 @@ const app = createApp({
     maxClockSkewSec: env.MAX_CLOCK_SKEW_SEC,
     apyEstimateBps: env.APY_ESTIMATE_BPS,
     yieldProtocol: env.YIELD_PROTOCOL,
+    apy,
   },
 });
 

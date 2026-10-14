@@ -503,6 +503,20 @@ describe("yield terms", () => {
     expect(b.guestYieldBps).toBe(2_500);
   });
 
+  it("uses the live APY source when configured: its rate in the estimate, its observation time as asOf", async () => {
+    const id = (await offer()).body.offerId as string;
+    deps.settings.apy = async () => ({ bps: 387, asOf: T0 / 1000 - 6, source: "market" });
+    try {
+      const r = v1.YieldTermsResponse.parse(await (await call(`/v1/yield/terms?offerId=${id}`)).json());
+      const checkIn = Date.parse("2026-06-10T12:00:00Z") / 1000;
+      expect(r.apyEstimateBps).toBe(387);
+      expect(r.estimatedGuestYieldAtomic).toBe(estimateGuestYield(3_200_000_000n, checkIn, T0 / 1000, 387, 5_000).toString());
+      expect(Date.parse(r.asOf)).toBe(T0 - 6_000);
+    } finally {
+      delete deps.settings.apy;
+    }
+  });
+
   it("estimate: zero inside the lead time, rounds down, spec 8 formula", () => {
     const now = 1_000_000;
     expect(estimateGuestYield(10n ** 12n, now + 14 * 86_400, now, 400, 5_000)).toBe(0n);

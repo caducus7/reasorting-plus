@@ -10,6 +10,7 @@ import { AlertOutbox, LogNotifier } from "@chain/indexer/alerts";
 import { projectionSource, viemChain } from "./chain.js";
 import { aaveLiquidity, mockVaultLiquidity } from "./liquidity.js";
 import { chainlinkPrice, fixedPrice } from "./price.js";
+import { aaveUtilisation, utilisationMonitor } from "./utilisation.js";
 
 async function main() {
   const env = Env.parse(process.env);
@@ -29,12 +30,14 @@ async function main() {
   const own = (await signerLock.query("SELECT pg_try_advisory_lock(hashtext('c8.rebalancer.signer:' || $1)) AS ok", [account.address.toLowerCase()])).rows[0].ok;
   if (!own) throw new Error(`another rebalancer process uses signer ${account.address}`);
   const loops = [];
+  let usdcSeen: Address | undefined;
   for (const escrow of env.ESCROWS) {
     // One writer per escrow: a second rebalancer on the same escrow would fight over nonces.
     const lock = await pool.connect();
     const got = (await lock.query("SELECT pg_try_advisory_lock(hashtext('c8.rebalancer:' || $1)) AS ok", [escrow.toLowerCase()])).rows[0].ok;
     if (!got) throw new Error(`another rebalancer is running for ${escrow}`);
     const usdc = (await client.readContract({ address: escrow, abi: [{ type: "function", name: "usdc", inputs: [], outputs: [{ type: "address" }], stateMutability: "view" }], functionName: "usdc" })) as Address;
+    usdcSeen ??= usdc;
     const chain = viemChain({
       client,
       account,
@@ -48,7 +51,13 @@ async function main() {
     loops.push(createExecutor({ pool, chain, dryRun: env.DRY_RUN, stuckAfterSec: env.STUCK_AFTER_SEC, policy: env.policy, alerts }));
     console.log(`rebalancer ${account.address} for ${escrow}: ${env.DRY_RUN ? "DRY RUN" : "LIVE"}`);
   }
+  // Utilisation: monitoring and alerting only, never a gate (spec 6.7). Aave markets only.
+  const utilisation =
+    env.LIQUIDITY_SOURCE === "aave" && usdcSeen
+      ? utilisationMonitor(aaveUtilisation(client, env.AAVE_POOL!, usdcSeen), new AlertOutbox(pool, env.CHAIN_ID, [new LogNotifier()]), { market: `aave-v3-${env.CHAIN_ID}-usdc` })
+      : null;
   for (;;) {
+    await utilisation?.().catch((e) => console.error("utilisation check failed", e));
     for (const ex of loops) await ex.cycle().catch((e) => console.error("cycle failed", e));
     await new Promise((r) => setTimeout(r, env.CYCLE_SEC * 1000));
   }
