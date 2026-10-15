@@ -76,7 +76,7 @@ the owner's testnet wallet.
 
 ## Spec concerns
 
-- R2 touches the boundary in spec 11: the `/v1` `calls` objects carry `{to, data, value}` and no gas.
+- R2 touches the boundary in spec 11: the `/v1` `calls` objects carry `{to, data, value}` and no gas. Resolved by guidance in spec 11; no interface change (owner, 2026-10-15).
 
 ## Interfaces changed
 
@@ -86,5 +86,5 @@ the owner's testnet wallet.
 
 ## Blocked
 
-- **Owner decision:** add an optional `gas` hint to `/v1` calls? It would need an ADR and the agent workstream's sign-off (spec 5.3). The default is no change, with R2 documented for the checkout.
+- ~~**Owner decision:** add an optional `gas` hint to `/v1` calls?~~ **Decided 2026-10-15: no.** `/v1` stays unchanged. R2's guidance (atomic EIP-5792 batches, or estimate + 60,000 gas) is now in spec 11 for the checkout.
 - **The real Sepolia run** needs the owner's testnet wallet.

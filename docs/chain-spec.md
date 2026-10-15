@@ -725,6 +725,13 @@ cancelled now, accrued yield.
 The agent workstream consumes only the Service API in section 5.3 and the read projections. It never
 calls contracts, never holds keys, and never receives `feeBps`. The checkout page is built by the
 agent workstream (their A3) and submits the `calls` bundle from `prepare` via the guest's wallet.
+**Submitting `calls` (guidance, no API change).** Submit each bundle atomically (EIP-5792
+`wallet_sendCalls`) where the wallet supports it. When the calls go one at a time, send each with gas
+= `eth_estimateGas` + 60,000. Otherwise a `claim` can run out of gas when it books a yield gain that
+its estimate missed: the gain path costs up to +42,876 gas. The Base Sepolia fork rehearsal
+reproduced this in 3/3 runs (`docs/handoffs/rehearsal-sepolia-fork.md`, finding R2). No funds are at
+risk: the transaction reverts and a retry succeeds, but the guest pays gas for the failure. The
+owner decided on 2026-10-15 to keep `/v1` unchanged (no gas hint in `calls`).
 Acceptance for the chain side: with the agent service switched off, a guest can search, get an offer,
 prepare, pay, cancel and check status end to end.
 
